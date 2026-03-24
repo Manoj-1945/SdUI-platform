@@ -12,7 +12,7 @@ import {
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { LineChart } from 'react-native-chart-kit';
-import api from '@/src/utils/api';
+import api from '../../src/utils/api';
 
 const screenWidth = Dimensions.get('window').width;
 

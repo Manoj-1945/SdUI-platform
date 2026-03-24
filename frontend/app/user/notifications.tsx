@@ -9,7 +9,7 @@ import {
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import api from '@/src/utils/api';
+import api from '../../src/utils/api';
 
 export default function Notifications() {
   const router = useRouter();
