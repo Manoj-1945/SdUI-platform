@@ -84,9 +84,17 @@ export default function AdminDashboard() {
           <Text style={styles.greeting}>Admin Panel</Text>
           <Text style={styles.userName}>{user?.name}</Text>
         </View>
-        <TouchableOpacity onPress={handleLogout}>
-          <Ionicons name="log-out" size={28} color="#E74C3C" />
-        </TouchableOpacity>
+        <View style={styles.headerActions}>
+          <TouchableOpacity
+            onPress={() => router.push('/admin/settings')}
+            style={styles.settingsButton}
+          >
+            <Ionicons name="settings" size={24} color="#4A90E2" />
+          </TouchableOpacity>
+          <TouchableOpacity onPress={handleLogout}>
+            <Ionicons name="log-out" size={28} color="#E74C3C" />
+          </TouchableOpacity>
+        </View>
       </View>
 
       {/* Stats Cards */}
@@ -155,6 +163,14 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     padding: 24,
     paddingTop: 60,
+  },
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 16,
+  },
+  settingsButton: {
+    padding: 4,
   },
   greeting: {
     fontSize: 16,

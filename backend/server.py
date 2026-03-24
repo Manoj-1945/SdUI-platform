@@ -692,6 +692,160 @@ async def get_admin_stats(request: Request, authorization: Optional[str] = Heade
         "totalRevenue": revenue
     }
 
+@app.put("/api/admin/update-tariff")
+async def update_tariff_rate(
+    user_id: str,
+    new_rate: float,
+    request: Request,
+    authorization: Optional[str] = Header(None)
+):
+    """Update tariff rate for a specific user (admin only)"""
+    admin = await get_current_user(authorization, request)
+    
+    if admin.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+    
+    result = await users_collection.update_one(
+        {"user_id": user_id},
+        {"$set": {"tariffRate": new_rate}}
+    )
+    
+    if result.modified_count == 0:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    # Create notification for user
+    notif_doc = {
+        "notifId": f"notif_{uuid.uuid4().hex[:12]}",
+        "userId": user_id,
+        "type": "tariff_update",
+        "message": f"Your tariff rate has been updated to ₹{new_rate}/kWh",
+        "isRead": False,
+        "createdAt": datetime.now(timezone.utc)
+    }
+    await notifications_collection.insert_one(notif_doc)
+    
+    return {"message": "Tariff rate updated successfully", "newRate": new_rate}
+
+@app.put("/api/admin/update-global-tariff")
+async def update_global_tariff(
+    new_rate: float,
+    request: Request,
+    authorization: Optional[str] = Header(None)
+):
+    """Update tariff rate for all users (admin only)"""
+    admin = await get_current_user(authorization, request)
+    
+    if admin.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+    
+    result = await users_collection.update_many(
+        {"role": "user"},
+        {"$set": {"tariffRate": new_rate}}
+    )
+    
+    return {
+        "message": "Global tariff rate updated successfully",
+        "newRate": new_rate,
+        "usersAffected": result.modified_count
+    }
+
+@app.get("/api/admin/users/problematic")
+async def get_problematic_users(
+    request: Request,
+    authorization: Optional[str] = Header(None)
+):
+    """Get users with unpaid bills or low balance (admin only)"""
+    admin = await get_current_user(authorization, request)
+    
+    if admin.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+    
+    # Get users with unpaid bills
+    unpaid_bills = await bills_collection.find(
+        {"status": "unpaid"},
+        {"_id": 0}
+    ).to_list(length=1000)
+    
+    user_ids_with_unpaid = list(set([bill["userId"] for bill in unpaid_bills]))
+    
+    # Get users with low balance (less than 100)
+    low_balance_users = await users_collection.find(
+        {"role": "user", "balance": {"$lt": 100}},
+        {"_id": 0, "password": 0}
+    ).to_list(length=1000)
+    
+    # Get users with unpaid bills
+    users_with_unpaid = await users_collection.find(
+        {"role": "user", "user_id": {"$in": user_ids_with_unpaid}},
+        {"_id": 0, "password": 0}
+    ).to_list(length=1000)
+    
+    return {
+        "lowBalanceUsers": low_balance_users,
+        "unpaidBillUsers": users_with_unpaid,
+        "totalProblematicUsers": len(set([u["user_id"] for u in low_balance_users] + user_ids_with_unpaid))
+    }
+
+@app.get("/api/admin/users/high-consumption")
+async def get_high_consumption_users(
+    request: Request,
+    authorization: Optional[str] = Header(None)
+):
+    """Get users with high energy consumption (admin only)"""
+    admin = await get_current_user(authorization, request)
+    
+    if admin.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+    
+    # Get last 7 days consumption
+    seven_days_ago = datetime.now(timezone.utc) - timedelta(days=7)
+    
+    pipeline = [
+        {
+            "$match": {
+                "timestamp": {"$gte": seven_days_ago}
+            }
+        },
+        {
+            "$group": {
+                "_id": "$userId",
+                "totalEnergy": {"$sum": "$energy"},
+                "avgPower": {"$avg": "$power"}
+            }
+        },
+        {
+            "$match": {
+                "totalEnergy": {"$gt": 100}  # More than 100 kWh in 7 days
+            }
+        },
+        {
+            "$sort": {"totalEnergy": -1}
+        }
+    ]
+    
+    high_consumption = await energy_readings_collection.aggregate(pipeline).to_list(length=100)
+    
+    # Get user details
+    user_ids = [item["_id"] for item in high_consumption]
+    users = await users_collection.find(
+        {"user_id": {"$in": user_ids}},
+        {"_id": 0, "password": 0}
+    ).to_list(length=100)
+    
+    # Combine data
+    result = []
+    for consumption in high_consumption:
+        user = next((u for u in users if u["user_id"] == consumption["_id"]), None)
+        if user:
+            result.append({
+                "user": user,
+                "totalEnergy": consumption["totalEnergy"],
+                "avgPower": consumption["avgPower"],
+                "estimatedCost": consumption["totalEnergy"] * user.get("tariffRate", 8.0)
+            })
+    
+    return {"highConsumptionUsers": result}
+
 @app.get("/")
 async def root():
     return {"message": "Smart Energy Monitoring API", "status": "running"}
