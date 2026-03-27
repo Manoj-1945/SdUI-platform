@@ -9,6 +9,7 @@ import os
 import uuid
 import bcrypt
 import requests
+import razorpay
 
 load_dotenv()
 
@@ -27,6 +28,11 @@ app.add_middleware(
 MONGO_URL = os.getenv("MONGO_URL", "mongodb://localhost:27017")
 client = AsyncIOMotorClient(MONGO_URL)
 db = client["smart_energy_db"]
+
+# Razorpay Client (Test Mode)
+RAZORPAY_KEY_ID = os.getenv("RAZORPAY_KEY_ID", "rzp_test_xxxxxxxxxx")
+RAZORPAY_KEY_SECRET = os.getenv("RAZORPAY_KEY_SECRET", "xxxxxxxxxxxxxx")
+razorpay_client = razorpay.Client(auth=(RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET))
 
 # Collections
 users_collection = db["users"]
