@@ -177,6 +177,27 @@ export default function UserDashboard() {
         <View style={styles.actionsGrid}>
           <TouchableOpacity
             style={styles.actionButton}
+            onPress={() => router.push('/user/device-setup')}
+          >
+            <Ionicons name="hardware-chip" size={32} color="#FFD700" />
+            <Text style={styles.actionText}>Add Device</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.actionButton}
+            onPress={() => router.push('/user/calibration')}
+          >
+            <Ionicons name="flash" size={32} color="#9B59B6" />
+            <Text style={styles.actionText}>Calibrate</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.actionButton}
+            onPress={() => router.push('/user/appliances')}
+          >
+            <Ionicons name="apps" size={32} color="#27AE60" />
+            <Text style={styles.actionText}>Appliances</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.actionButton}
             onPress={() => router.push('/user/energy-history')}
           >
             <Ionicons name="bar-chart" size={32} color="#4A90E2" />

@@ -17,6 +17,9 @@ export default function RootLayout() {
       <Stack.Screen name="user/billing" />
       <Stack.Screen name="user/notifications" />
       <Stack.Screen name="user/predicted-bill" />
+      <Stack.Screen name="user/device-setup" />
+      <Stack.Screen name="user/calibration" />
+      <Stack.Screen name="user/appliances" />
       <Stack.Screen name="admin/dashboard" />
       <Stack.Screen name="admin/user-detail" />
     </Stack>
