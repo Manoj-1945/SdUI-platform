@@ -43,6 +43,9 @@ bills_collection = db["bills"]
 payments_collection = db["payments"]
 notifications_collection = db["notifications"]
 power_control_collection = db["power_control"]
+devices_collection = db["devices"]
+appliances_collection = db["appliances"]
+power_spikes_collection = db["power_spikes"]
 
 # Pydantic Models
 class UserSignup(BaseModel):
@@ -86,6 +89,24 @@ class PowerControlRequest(BaseModel):
 class UpdatePaymentStatus(BaseModel):
     billId: str
     status: str  # "paid" or "unpaid"
+
+# ESP32 Device & Appliance Models
+class DeviceRegistration(BaseModel):
+    deviceId: str  # ESP32-ABC123
+    deviceName: Optional[str] = None
+
+class ApplianceCalibration(BaseModel):
+    deviceId: str
+    applianceName: str
+    minPower: float
+    maxPower: float
+    avgPower: float
+
+class PowerSpikeData(BaseModel):
+    deviceId: str
+    power: float
+    voltage: float
+    current: float
 
 # Helper functions
 def hash_password(password: str) -> str:
@@ -542,13 +563,19 @@ async def get_predicted_bill(request: Request, authorization: Optional[str] = He
 # IoT Data Endpoint
 @app.post("/api/iot/data")
 async def receive_iot_data(iot_data: IoTData):
-    """Receive IoT sensor data"""
+    """Receive IoT sensor data with real-time spike detection and appliance matching"""
     # Validate user exists
     user = await users_collection.find_one({"user_id": iot_data.userId})
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     
-    # Store reading
+    # Get last reading for this user to detect spikes
+    last_reading = await energy_readings_collection.find_one(
+        {"userId": iot_data.userId},
+        sort=[("timestamp", -1)]
+    )
+    
+    # Store current reading
     reading_doc = {
         "readingId": f"read_{uuid.uuid4().hex[:12]}",
         "userId": iot_data.userId,
@@ -560,19 +587,99 @@ async def receive_iot_data(iot_data: IoTData):
     }
     await energy_readings_collection.insert_one(reading_doc)
     
-    # Check for high usage and create alert
+    # POWER SPIKE DETECTION (for calibration)
+    if last_reading:
+        power_increase = iot_data.power - last_reading.get("power", 0)
+        
+        # Detect significant power increase (spike > 100W)
+        if power_increase > 100:
+            # Get device for this user (if registered)
+            device = await devices_collection.find_one({"userId": iot_data.userId})
+            
+            if device:
+                # Save power spike for calibration
+                spike_doc = {
+                    "spikeId": f"spike_{uuid.uuid4().hex[:12]}",
+                    "userId": iot_data.userId,
+                    "deviceId": device["deviceId"],
+                    "power": iot_data.power,
+                    "voltage": iot_data.voltage,
+                    "current": iot_data.current,
+                    "powerIncrease": power_increase,
+                    "timestamp": datetime.now(timezone.utc),
+                    "calibrated": False
+                }
+                await power_spikes_collection.insert_one(spike_doc)
+                
+                # Create notification for calibration
+                notif_doc = {
+                    "notifId": f"notif_{uuid.uuid4().hex[:12]}",
+                    "userId": iot_data.userId,
+                    "type": "power_spike",
+                    "message": f"Power spike detected: +{power_increase:.0f}W. Tap to calibrate appliance.",
+                    "data": {"spikeId": spike_doc["spikeId"], "power": iot_data.power},
+                    "isRead": False,
+                    "createdAt": datetime.now(timezone.utc)
+                }
+                await notifications_collection.insert_one(notif_doc)
+    
+    # APPLIANCE DETECTION (match current power to saved appliances)
+    cursor = appliances_collection.find(
+        {
+            "userId": iot_data.userId,
+            "notificationsEnabled": True
+        }
+    )
+    appliances = await cursor.to_list(length=100)
+    
+    for appliance in appliances:
+        # Check if current power matches appliance range (with 10% tolerance)
+        min_power = appliance["minPower"] * 0.9
+        max_power = appliance["maxPower"] * 1.1
+        
+        if min_power <= iot_data.power <= max_power:
+            # Appliance detected! Send notification
+            # Check if we already sent notification recently (avoid spam)
+            recent_notif = await notifications_collection.find_one({
+                "userId": iot_data.userId,
+                "type": "appliance_detected",
+                "data.applianceId": appliance["applianceId"],
+                "createdAt": {"$gte": datetime.now(timezone.utc) - timedelta(minutes=5)}
+            })
+            
+            if not recent_notif:
+                notif_doc = {
+                    "notifId": f"notif_{uuid.uuid4().hex[:12]}",
+                    "userId": iot_data.userId,
+                    "type": "appliance_detected",
+                    "message": f"🔌 {appliance['name']} turned ON ({iot_data.power:.0f}W)",
+                    "data": {
+                        "applianceId": appliance["applianceId"],
+                        "applianceName": appliance["name"],
+                        "power": iot_data.power
+                    },
+                    "isRead": False,
+                    "createdAt": datetime.now(timezone.utc)
+                }
+                await notifications_collection.insert_one(notif_doc)
+    
+    # Check for high usage alert
     if iot_data.power > 5000:  # More than 5kW
         notif_doc = {
             "notifId": f"notif_{uuid.uuid4().hex[:12]}",
             "userId": iot_data.userId,
             "type": "high_usage",
-            "message": f"High power usage detected: {iot_data.power}W",
+            "message": f"⚠️ High power usage detected: {iot_data.power}W",
             "isRead": False,
             "createdAt": datetime.now(timezone.utc)
         }
         await notifications_collection.insert_one(notif_doc)
     
-    return {"message": "Data received successfully"}
+    return {
+        "message": "Data received successfully",
+        "powerSpikeDetected": power_increase > 100 if last_reading else False,
+        "appliancesDetected": len([a for a in appliances if a["minPower"]*0.9 <= iot_data.power <= a["maxPower"]*1.1])
+    }
 
 # Admin Endpoints
 @app.get("/api/admin/users")
@@ -852,6 +959,201 @@ async def get_high_consumption_users(
             })
     
     return {"highConsumptionUsers": result}
+
+
+# ESP32 Device & Appliance Management Endpoints
+
+@app.post("/api/user/register-device")
+async def register_device(
+    device: DeviceRegistration,
+    request: Request,
+    authorization: Optional[str] = Header(None)
+):
+    """Register ESP32 device to user account"""
+    user = await get_current_user(authorization, request)
+    
+    # Check if device already registered
+    existing = await devices_collection.find_one({"deviceId": device.deviceId})
+    if existing:
+        raise HTTPException(status_code=400, detail="Device already registered to another user")
+    
+    # Register device
+    device_doc = {
+        "deviceId": device.deviceId,
+        "deviceName": device.deviceName or device.deviceId,
+        "userId": user.user_id,
+        "registeredAt": datetime.now(timezone.utc),
+        "status": "active",
+        "lastSeen": None
+    }
+    
+    await devices_collection.insert_one(device_doc)
+    
+    # Create notification
+    notif_doc = {
+        "notifId": f"notif_{uuid.uuid4().hex[:12]}",
+        "userId": user.user_id,
+        "type": "device_registered",
+        "message": f"Device {device.deviceId} registered successfully",
+        "isRead": False,
+        "createdAt": datetime.now(timezone.utc)
+    }
+    await notifications_collection.insert_one(notif_doc)
+    
+    device_doc.pop("_id")
+    return {"message": "Device registered successfully", "device": device_doc}
+
+@app.get("/api/user/devices")
+async def get_user_devices(
+    request: Request,
+    authorization: Optional[str] = Header(None)
+):
+    """Get all devices registered to user"""
+    user = await get_current_user(authorization, request)
+    
+    cursor = devices_collection.find(
+        {"userId": user.user_id},
+        {"_id": 0}
+    )
+    
+    devices = await cursor.to_list(length=100)
+    
+    return {"devices": devices}
+
+@app.post("/api/user/calibrate-appliance")
+async def calibrate_appliance(
+    appliance: ApplianceCalibration,
+    request: Request,
+    authorization: Optional[str] = Header(None)
+):
+    """Save calibrated appliance power profile"""
+    user = await get_current_user(authorization, request)
+    
+    # Verify device belongs to user
+    device = await devices_collection.find_one({
+        "deviceId": appliance.deviceId,
+        "userId": user.user_id
+    })
+    
+    if not device:
+        raise HTTPException(status_code=404, detail="Device not found or doesn't belong to you")
+    
+    # Save appliance profile
+    appliance_doc = {
+        "applianceId": f"app_{uuid.uuid4().hex[:12]}",
+        "userId": user.user_id,
+        "deviceId": appliance.deviceId,
+        "name": appliance.applianceName,
+        "minPower": appliance.minPower,
+        "maxPower": appliance.maxPower,
+        "avgPower": appliance.avgPower,
+        "calibratedAt": datetime.now(timezone.utc),
+        "notificationsEnabled": True
+    }
+    
+    await appliances_collection.insert_one(appliance_doc)
+    
+    # Create notification
+    notif_doc = {
+        "notifId": f"notif_{uuid.uuid4().hex[:12]}",
+        "userId": user.user_id,
+        "type": "appliance_calibrated",
+        "message": f"Appliance '{appliance.applianceName}' calibrated successfully",
+        "isRead": False,
+        "createdAt": datetime.now(timezone.utc)
+    }
+    await notifications_collection.insert_one(notif_doc)
+    
+    appliance_doc.pop("_id")
+    return {"message": "Appliance calibrated successfully", "appliance": appliance_doc}
+
+@app.get("/api/user/appliances")
+async def get_user_appliances(
+    request: Request,
+    authorization: Optional[str] = Header(None)
+):
+    """Get all calibrated appliances for user"""
+    user = await get_current_user(authorization, request)
+    
+    cursor = appliances_collection.find(
+        {"userId": user.user_id},
+        {"_id": 0}
+    )
+    
+    appliances = await cursor.to_list(length=100)
+    
+    return {"appliances": appliances}
+
+@app.delete("/api/user/appliance/{appliance_id}")
+async def delete_appliance(
+    appliance_id: str,
+    request: Request,
+    authorization: Optional[str] = Header(None)
+):
+    """Delete an appliance"""
+    user = await get_current_user(authorization, request)
+    
+    result = await appliances_collection.delete_one({
+        "applianceId": appliance_id,
+        "userId": user.user_id
+    })
+    
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Appliance not found")
+    
+    return {"message": "Appliance deleted successfully"}
+
+@app.get("/api/user/power-spikes")
+async def get_power_spikes(
+    request: Request,
+    authorization: Optional[str] = Header(None),
+    uncalibrated_only: bool = True
+):
+    """Get detected power spikes for calibration"""
+    user = await get_current_user(authorization, request)
+    
+    query = {"userId": user.user_id}
+    if uncalibrated_only:
+        query["calibrated"] = False
+    
+    cursor = power_spikes_collection.find(
+        query,
+        {"_id": 0}
+    ).sort("timestamp", -1)
+    
+    spikes = await cursor.to_list(length=50)
+    
+    return {"spikes": spikes}
+
+@app.put("/api/user/appliance/{appliance_id}/toggle-notifications")
+async def toggle_appliance_notifications(
+    appliance_id: str,
+    request: Request,
+    authorization: Optional[str] = Header(None)
+):
+    """Toggle notifications for an appliance"""
+    user = await get_current_user(authorization, request)
+    
+    appliance = await appliances_collection.find_one({
+        "applianceId": appliance_id,
+        "userId": user.user_id
+    })
+    
+    if not appliance:
+        raise HTTPException(status_code=404, detail="Appliance not found")
+    
+    new_state = not appliance.get("notificationsEnabled", True)
+    
+    await appliances_collection.update_one(
+        {"applianceId": appliance_id},
+        {"$set": {"notificationsEnabled": new_state}}
+    )
+    
+    return {
+        "message": f"Notifications {'enabled' if new_state else 'disabled'}",
+        "notificationsEnabled": new_state
+    }
+
 
 @app.get("/")
 async def root():
