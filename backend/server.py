@@ -26,8 +26,9 @@ app.add_middleware(
 
 # MongoDB connection
 MONGO_URL = os.getenv("MONGO_URL", "mongodb://localhost:27017")
+DB_NAME = os.getenv("DB_NAME", "smart_energy_db")
 client = AsyncIOMotorClient(MONGO_URL)
-db = client["smart_energy_db"]
+db = client[DB_NAME]
 
 # Razorpay Client (Test Mode)
 RAZORPAY_KEY_ID = os.getenv("RAZORPAY_KEY_ID", "rzp_test_xxxxxxxxxx")
