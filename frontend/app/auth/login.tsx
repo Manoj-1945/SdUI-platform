@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   View,
   Text,
@@ -9,21 +9,29 @@ import {
   Platform,
   ScrollView,
   Alert,
-  Linking,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useAuthStore } from '../../src/store/authStore';
 import { Ionicons } from '@expo/vector-icons';
 import Constants from 'expo-constants';
+import * as AuthSession from 'expo-auth-session';
+import * as Google from 'expo-auth-session/providers/google';
+import { ResponseType } from 'expo-auth-session';
+import {
+  GOOGLE_WEB_CLIENT_ID,
+  GOOGLE_ANDROID_CLIENT_ID,
+  GOOGLE_IOS_CLIENT_ID,
+} from '../../src/config/googleAuth';
 
 const BACKEND_URL = Constants.expoConfig?.extra?.EXPO_PUBLIC_BACKEND_URL || process.env.EXPO_PUBLIC_BACKEND_URL;
 
 export default function Login() {
   const router = useRouter();
-  const { login } = useAuthStore();
+  const { login, googleAuth } = useAuthStore();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
+  const [googleLoading, setGoogleLoading] = useState(false);
 
   const handleLogin = async () => {
     if (!email || !password) {
@@ -42,11 +50,52 @@ export default function Login() {
     }
   };
 
-  const handleGoogleLogin = () => {
-    // REMINDER: DO NOT HARDCODE THE URL, OR ADD ANY FALLBACKS OR REDIRECT URLS, THIS BREAKS THE AUTH
-    const redirectUrl = `${BACKEND_URL}/auth/callback`;
-    const authUrl = `https://auth.emergentagent.com/?redirect=${encodeURIComponent(redirectUrl)}`;
-    Linking.openURL(authUrl);
+  const redirectUri = Platform.OS === 'web' && typeof window !== 'undefined'
+    ? `${window.location.origin}/`
+    : AuthSession.makeRedirectUri({ scheme: 'frontend' });
+
+  const [request, response, promptAsync] = Google.useAuthRequest({
+    responseType: ResponseType.IdToken,
+    webClientId: GOOGLE_WEB_CLIENT_ID,
+    androidClientId: GOOGLE_ANDROID_CLIENT_ID || undefined,
+    iosClientId: GOOGLE_IOS_CLIENT_ID || undefined,
+    redirectUri,
+    scopes: ['openid', 'profile', 'email'],
+  });
+
+  useEffect(() => {
+    if (response?.type === 'success') {
+      const idToken = response.authentication?.idToken || response.params?.id_token;
+      if (!idToken) {
+        Alert.alert('Error', 'Failed to get ID token from Google');
+        setGoogleLoading(false);
+        return;
+      }
+
+      googleAuth(idToken)
+        .then(() => router.replace('/user/dashboard'))
+        .catch((error: any) => {
+          Alert.alert('Google Login Failed', error.message || 'Google auth failed');
+        })
+        .finally(() => setGoogleLoading(false));
+    } else if (response?.type === 'error') {
+      Alert.alert('Error', response.error?.message || 'Google sign-in failed');
+      setGoogleLoading(false);
+    }
+  }, [response]);
+
+  const handleGoogleLogin = async () => {
+    setGoogleLoading(true);
+    try {
+      if (!request) {
+        throw new Error('Google auth request not ready');
+      }
+
+      await promptAsync();
+    } catch (error: any) {
+      Alert.alert('Google Login Failed', error.message || 'An unexpected error occurred');
+      setGoogleLoading(false);
+    }
   };
 
   return (
@@ -111,11 +160,14 @@ export default function Login() {
           </View>
 
           <TouchableOpacity
-            style={styles.googleButton}
+            style={[styles.googleButton, googleLoading && styles.disabledButton]}
             onPress={handleGoogleLogin}
+            disabled={googleLoading}
           >
             <Ionicons name="logo-google" size={20} color="#FFF" />
-            <Text style={styles.googleButtonText}>Continue with Google</Text>
+            <Text style={styles.googleButtonText}>
+              {googleLoading ? 'Signing in...' : 'Continue with Google'}
+            </Text>
           </TouchableOpacity>
 
           <TouchableOpacity onPress={() => router.push('/auth/signup')}>
