@@ -266,7 +266,33 @@ MONGO_URL=mongodb://localhost:27017
 EXPO_PUBLIC_BACKEND_URL=https://iot-meter-track.preview.emergentagent.com
 ```
 
-## 📞 Support
+## � Deployment
+
+### Frontend on Vercel
+1. Import the frontend folder into Vercel.
+2. Set the Root Directory to frontend.
+3. Use these environment variables:
+   - EXPO_PUBLIC_BACKEND_URL=https://your-backend-url
+   - EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID=your-google-web-client-id
+   - EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID=your-google-android-client-id
+4. Deploy.
+
+### Backend on Render
+1. Create a new Web Service from the backend folder.
+2. Use Python 3.11.
+3. Build Command: `pip install -r requirements.txt`
+4. Start Command: `uvicorn server:app --host 0.0.0.0 --port $PORT`
+5. Add these environment variables:
+   - GOOGLE_CLIENT_ID=your-google-client-id
+   - GOOGLE_CLIENT_IDS=your-google-client-id
+   - RAZORPAY_KEY_ID=your-razorpay-key
+   - RAZORPAY_KEY_SECRET=your-razorpay-secret
+
+### Free alternatives
+- Frontend: Vercel, Netlify
+- Backend: Render, Railway, Fly.io
+
+## �📞 Support
 
 For any issues or questions, refer to:
 - Backend logs: `/var/log/supervisor/backend.err.log`

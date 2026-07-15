@@ -2,10 +2,19 @@ import axios from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Constants from 'expo-constants';
 
-const BACKEND_URL = Constants.expoConfig?.extra?.EXPO_PUBLIC_BACKEND_URL || process.env.EXPO_PUBLIC_BACKEND_URL;
+const DEFAULT_BACKEND_URL = process.env.NODE_ENV === 'production' ? '' : 'http://127.0.0.1:8001';
+
+export const getBackendUrl = () => {
+  const configuredUrl = Constants.expoConfig?.extra?.EXPO_PUBLIC_BACKEND_URL || process.env.EXPO_PUBLIC_BACKEND_URL;
+  const backendUrl = configuredUrl || DEFAULT_BACKEND_URL;
+  if (!backendUrl) {
+    console.warn('EXPO_PUBLIC_BACKEND_URL is not defined. Set it in the environment for production builds.');
+  }
+  return backendUrl.replace(/\/$/, '');
+};
 
 const api = axios.create({
-  baseURL: BACKEND_URL,
+  baseURL: getBackendUrl(),
   timeout: 30000,
 });
 

@@ -1,9 +1,6 @@
 import { create } from 'zustand';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import axios from 'axios';
-import Constants from 'expo-constants';
-
-const BACKEND_URL = Constants.expoConfig?.extra?.EXPO_PUBLIC_BACKEND_URL || process.env.EXPO_PUBLIC_BACKEND_URL;
+import api from '../utils/api';
 
 interface User {
   user_id: string;
@@ -47,7 +44,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
   login: async (email, password) => {
     try {
-      const response = await axios.post(`${BACKEND_URL}/api/auth/login`, {
+      const response = await api.post('/api/auth/login', {
         email,
         password,
       });
@@ -62,7 +59,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
   signup: async (email, password, name) => {
     try {
-      const response = await axios.post(`${BACKEND_URL}/api/auth/signup`, {
+      const response = await api.post('/api/auth/signup', {
         email,
         password,
         name,
@@ -76,10 +73,10 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     }
   },
 
-  googleAuth: async (sessionId) => {
+  googleAuth: async (idToken: string) => {
     try {
-      const response = await axios.post(`${BACKEND_URL}/api/auth/google`, {
-        session_id: sessionId,
+      const response = await api.post('/api/auth/google', {
+        idToken: idToken,
       });
 
       const { user, session_token } = response.data;
@@ -92,7 +89,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
   adminLogin: async (email, password) => {
     try {
-      const response = await axios.post(`${BACKEND_URL}/api/admin/login`, {
+      const response = await api.post('/api/admin/login', {
         email,
         password,
       });
@@ -109,8 +106,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     const token = get().sessionToken;
     if (token) {
       try {
-        await axios.post(
-          `${BACKEND_URL}/api/auth/logout`,
+        await api.post(
+          '/api/auth/logout',
           {},
           {
             headers: {
@@ -134,7 +131,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         return;
       }
 
-      const response = await axios.get(`${BACKEND_URL}/api/auth/me`, {
+      const response = await api.get('/api/auth/me', {
         headers: {
           Authorization: `Bearer ${token}`,
         },
