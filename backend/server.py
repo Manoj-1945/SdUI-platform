@@ -321,8 +321,12 @@ async def get_current_user(authorization: Optional[str] = Header(None), request:
         user = db.query(DBUser).filter(DBUser.session_token == session_token).first()
         if not user:
             raise HTTPException(status_code=401, detail="Invalid session")
-        if user.session_expires_at and user.session_expires_at < datetime.now(timezone.utc):
-            raise HTTPException(status_code=401, detail="Session expired")
+        expires_at = user.session_expires_at
+        if expires_at is not None:
+            if expires_at.tzinfo is None:
+                expires_at = expires_at.replace(tzinfo=timezone.utc)
+            if expires_at < datetime.now(timezone.utc):
+                raise HTTPException(status_code=401, detail="Session expired")
         return User(**user_to_schema(user))
     finally:
         db.close()
@@ -411,10 +415,12 @@ async def google_auth(token_data: dict):
 
 
 @app.post("/api/auth/logout")
-async def logout(request: Request, response: Response):
+async def logout(request: Request, response: Response, authorization: Optional[str] = Header(None)):
     db = SessionLocal()
     try:
         session_token = request.cookies.get("session_token")
+        if not session_token and authorization:
+            session_token = authorization.replace("Bearer ", "")
         if session_token:
             user = db.query(DBUser).filter(DBUser.session_token == session_token).first()
             if user:
@@ -426,7 +432,6 @@ async def logout(request: Request, response: Response):
 
     response.delete_cookie("session_token")
     return {"message": "Logged out successfully"}
-
 
 @app.get("/api/auth/me")
 async def get_current_user_profile(request: Request, authorization: Optional[str] = Header(None)):
