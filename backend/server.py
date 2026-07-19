@@ -1,6 +1,6 @@
-from fastapi import FastAPI, HTTPException, Header, Response, Request
+from fastapi import FastAPI, HTTPException, Header, Response, Request, WebSocket, WebSocketDisconnect, Query
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime, Boolean
+from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime, Boolean, Text
 from sqlalchemy.orm import declarative_base, sessionmaker
 from pydantic import BaseModel, EmailStr
 from typing import Optional
@@ -11,8 +11,13 @@ import os
 import uuid
 import bcrypt
 import razorpay
+import requests
+from fpdf import FPDF
+from pywebpush import webpush, WebPushException
 from google.oauth2 import id_token
 from google.auth.transport import requests as google_requests
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from apscheduler.triggers.cron import CronTrigger
 
 load_dotenv()
 
@@ -25,6 +30,34 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+class ConnectionManager:
+    """Tracks live WebSocket connections per user so new sensor readings
+    can be pushed instantly instead of the frontend having to poll."""
+
+    def __init__(self):
+        self.active_connections: dict = {}
+
+    async def connect(self, user_id: str, websocket: WebSocket):
+        await websocket.accept()
+        self.active_connections.setdefault(user_id, []).append(websocket)
+
+    def disconnect(self, user_id: str, websocket: WebSocket):
+        conns = self.active_connections.get(user_id)
+        if conns and websocket in conns:
+            conns.remove(websocket)
+        if conns is not None and not conns:
+            self.active_connections.pop(user_id, None)
+
+    async def send_to_user(self, user_id: str, message: dict):
+        for ws in list(self.active_connections.get(user_id, [])):
+            try:
+                await ws.send_json(message)
+            except Exception:
+                self.disconnect(user_id, ws)
+
+
+manager = ConnectionManager()
 
 DATABASE_URL = "sqlite:///./smart_energy.db"
 engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
@@ -94,6 +127,13 @@ class Notification(Base):
     isRead = Column(Boolean, default=False)
     createdAt = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
+class PushSubscription(Base):
+    __tablename__ = "push_subscriptions"
+    id = Column(Integer, primary_key=True)
+    userId = Column(String, nullable=False, index=True)
+    platform = Column(String, nullable=False)  # "web" or "native"
+    token = Column(Text, nullable=False)
+    createdAt = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
 class PowerControl(Base):
     __tablename__ = "power_control"
@@ -150,7 +190,124 @@ RAZORPAY_KEY_ID = os.getenv("RAZORPAY_KEY_ID", "rzp_test_xxxxxxxxxx")
 RAZORPAY_KEY_SECRET = os.getenv("RAZORPAY_KEY_SECRET", "xxxxxxxxxxxxxx")
 razorpay_client = razorpay.Client(auth=(RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET))
 
+VAPID_PUBLIC_KEY = os.getenv("VAPID_PUBLIC_KEY", "")
+VAPID_PRIVATE_KEY = os.getenv("VAPID_PRIVATE_KEY", "")
+VAPID_CLAIM_EMAIL = os.getenv("VAPID_CLAIM_EMAIL", "mailto:admin@example.com")
 
+
+def send_push_to_user(db, user_id: str, title: str, body: str, data: dict = None):
+    """Best-effort push notification to every device/browser this user has
+    registered. Never raises - a failed push should never break the request
+    that triggered it (e.g. a power spike being recorded)."""
+    if not VAPID_PRIVATE_KEY:
+        return  # push not configured yet, silently skip
+
+    subs = db.query(PushSubscription).filter(PushSubscription.userId == user_id).all()
+    for sub in subs:
+        try:
+            if sub.platform == "native":
+                requests.post(
+                    "https://exp.host/--/api/v2/push/send",
+                    json={"to": sub.token, "sound": "default", "title": title, "body": body, "data": data or {}},
+                    headers={"Content-Type": "application/json", "Accept": "application/json"},
+                    timeout=5,
+                )
+            elif sub.platform == "web":
+                subscription_info = json.loads(sub.token)
+                webpush(
+                    subscription_info=subscription_info,
+                    data=json.dumps({"title": title, "body": body, "data": data or {}}),
+                    vapid_private_key=VAPID_PRIVATE_KEY,
+                    vapid_claims={"sub": VAPID_CLAIM_EMAIL},
+                )
+        except WebPushException as exc:
+            print(f"[push] web push failed for user {user_id}: {exc}")
+            status = exc.response.status_code if exc.response is not None else None
+            if status in (404, 410):
+                db.delete(sub)
+                db.commit()
+        except Exception as exc:
+            print(f"[push] failed for user {user_id}: {exc}")
+
+def generate_bill_for_user(db, user):
+    """Sums a user's energy readings since their last bill (or account
+    creation, if they've never had one) and creates a new Bill row.
+    Returns the created Bill, or None if there was nothing to bill."""
+    last_bill = (
+        db.query(Bill)
+        .filter(Bill.userId == user.user_id)
+        .order_by(Bill.generatedAt.desc())
+        .first()
+    )
+    period_start = last_bill.generatedAt if last_bill else user.created_at
+    if period_start and period_start.tzinfo is None:
+        period_start = period_start.replace(tzinfo=timezone.utc)
+
+    readings = (
+        db.query(EnergyReading)
+        .filter(EnergyReading.userId == user.user_id, EnergyReading.timestamp >= period_start)
+        .all()
+    )
+    total_energy = sum(r.energy for r in readings)
+    if total_energy <= 0:
+        return None
+
+    amount = round(total_energy * user.tariffRate, 2)
+    now = datetime.now(timezone.utc)
+    bill = Bill(
+        billId=f"bill_{uuid.uuid4().hex[:12]}",
+        userId=user.user_id,
+        amount=amount,
+        status="unpaid",
+        generatedAt=now,
+        dueDate=now + timedelta(days=15),
+    )
+    db.add(bill)
+    db.add(
+        Notification(
+            notifId=f"notif_{uuid.uuid4().hex[:12]}",
+            userId=user.user_id,
+            type="bill_generated",
+            message=f"Your new bill of Rs.{amount} has been generated.",
+            data=None,
+        )
+    )
+    return bill
+
+
+def generate_bills_for_all_users():
+    """Runs monthly (see scheduler below): generates a bill for every
+    regular user based on their energy usage since their last bill."""
+    db = SessionLocal()
+    try:
+        users = db.query(DBUser).filter(DBUser.role == "user").all()
+        generated = 0
+        for user in users:
+            if generate_bill_for_user(db, user):
+                generated += 1
+        db.commit()
+        print(f"[billing] Monthly run complete: {generated} bill(s) generated")
+    finally:
+        db.close()
+
+
+scheduler = AsyncIOScheduler()
+
+
+@app.on_event("startup")
+async def start_billing_scheduler():
+    # Fires on the 1st of every month at 00:00 UTC. Render's free tier
+    # sleeps when idle, so this won't fire reliably unless something
+    # keeps the service awake (see /api/admin/generate-bills as a manual
+    # fallback, or an external pinger/cron hitting the service beforehand).
+    scheduler.add_job(
+        generate_bills_for_all_users,
+        CronTrigger(day=1, hour=0, minute=0),
+        id="monthly_billing",
+        replace_existing=True,
+    )
+    scheduler.start()
+    
 class UserSignup(BaseModel):
     email: EmailStr
     password: str
@@ -187,6 +344,16 @@ class PaymentRequest(BaseModel):
     amount: float
 
 
+class CreatePaymentOrderRequest(BaseModel):
+    billId: str
+
+
+class VerifyPaymentRequest(BaseModel):
+    billId: str
+    razorpay_order_id: str
+    razorpay_payment_id: str
+    razorpay_signature: str
+
 class PowerControlRequest(BaseModel):
     userId: str
     status: str
@@ -217,6 +384,44 @@ def hash_password(password: str) -> str:
 def verify_password(password: str, hashed: str) -> bool:
     return bcrypt.checkpw(password.encode("utf-8"), hashed.encode("utf-8"))
 
+def compute_power_status(db, user_id: str) -> bool:
+    """Returns True if power should show as ON for this user, based on
+    their latest bill and the most recent admin power-control action."""
+    latest_bill = db.query(Bill).filter(Bill.userId == user_id).order_by(Bill.generatedAt.desc()).first()
+    power_status = db.query(PowerControl).filter(PowerControl.userId == user_id).order_by(PowerControl.timestamp.desc()).first()
+
+    power_on = True
+    if latest_bill and latest_bill.status == "unpaid":
+        power_on = False
+    if power_status:
+        power_on = power_status.status == "ON"
+    return power_on
+
+LOW_BALANCE_THRESHOLD = 100.0
+
+
+def check_low_balance(db, user):
+    if user.balance >= LOW_BALANCE_THRESHOLD:
+        return
+    recent = db.query(Notification).filter(
+        Notification.userId == user.user_id,
+        Notification.type == "low_balance",
+        Notification.createdAt >= datetime.now(timezone.utc) - timedelta(hours=24),
+    ).first()
+    if recent:
+        return
+
+    db.add(Notification(
+        notifId=f"notif_{uuid.uuid4().hex[:12]}",
+        userId=user.user_id,
+        type="low_balance",
+        message=f"Your balance is low (Rs.{user.balance:.2f}). Add funds to avoid disruption.",
+        data=None,
+        isRead=False,
+        createdAt=datetime.now(timezone.utc),
+    ))
+    send_push_to_user(db, user.user_id, "Low balance warning", f"Your balance is Rs.{user.balance:.2f}. Add funds soon.")
+    db.commit()
 
 def user_to_schema(user: DBUser) -> dict:
     return {
@@ -341,6 +546,7 @@ async def signup(user_data: UserSignup):
             raise HTTPException(status_code=400, detail="Email already registered")
 
         user_id = f"user_{uuid.uuid4().hex[:12]}"
+        session_token = f"session_{uuid.uuid4().hex}"
         new_user = DBUser(
             user_id=user_id,
             email=str(user_data.email),
@@ -349,11 +555,15 @@ async def signup(user_data: UserSignup):
             role="user",
             balance=1000.0,
             tariffRate=8.0,
+            session_token=session_token,
+            session_expires_at=datetime.now(timezone.utc) + timedelta(days=1),
         )
         db.add(new_user)
         db.commit()
         db.refresh(new_user)
-        return {"user": user_to_schema(new_user)}
+        return {"user": user_to_schema(new_user), "session_token": session_token}
+    except HTTPException:
+        raise
     except Exception as exc:
         db.rollback()
         raise HTTPException(status_code=500, detail=str(exc))
@@ -399,7 +609,7 @@ async def google_auth(token_data: dict):
         user = db.query(DBUser).filter(DBUser.email == email).first()
         if not user:
             user_id = f"user_{uuid.uuid4().hex[:12]}"
-            user = DBUser(user_id=user_id, email=email, name=name, role="user", balance=1000.0)
+            user = DBUser(user_id=user_id, email=email, name=name, role="user", balance=1000.0, picture=idinfo.get("picture"))
             db.add(user)
 
         session_token = f"session_{uuid.uuid4().hex}"
@@ -407,7 +617,7 @@ async def google_auth(token_data: dict):
         user.session_expires_at = datetime.now(timezone.utc) + timedelta(days=1)
         db.commit()
         db.refresh(user)
-        return {"user": {"email": user.email, "name": user.name}, "session_token": session_token}
+        return {"user": user_to_schema(user), "session_token": session_token}
     except ValueError as exc:
         raise HTTPException(status_code=401, detail="Invalid Google Token") from exc
     finally:
@@ -438,6 +648,52 @@ async def get_current_user_profile(request: Request, authorization: Optional[str
     user = await get_current_user(authorization, request)
     return user.dict()
 
+class RegisterPushRequest(BaseModel):
+    platform: str
+    token: str
+
+
+@app.get("/api/vapid-public-key")
+async def get_vapid_public_key():
+    return {"publicKey": VAPID_PUBLIC_KEY}
+
+
+@app.post("/api/user/register-push-token")
+async def register_push_token(req: RegisterPushRequest, request: Request, authorization: Optional[str] = Header(None)):
+    user = await get_current_user(authorization, request)
+    if req.platform not in ("web", "native"):
+        raise HTTPException(status_code=400, detail="platform must be 'web' or 'native'")
+
+    db = SessionLocal()
+    try:
+        existing = db.query(PushSubscription).filter(PushSubscription.token == req.token).first()
+        if existing:
+            existing.userId = user.user_id
+            existing.platform = req.platform
+        else:
+            db.add(PushSubscription(userId=user.user_id, platform=req.platform, token=req.token))
+        db.commit()
+        return {"message": "Push subscription saved"}
+    finally:
+        db.close()
+        
+@app.websocket("/ws/{user_id}")
+async def websocket_endpoint(websocket: WebSocket, user_id: str, token: str = Query(None)):
+    db = SessionLocal()
+    try:
+        user = db.query(DBUser).filter(DBUser.session_token == token).first() if token else None
+        if not user or user.user_id != user_id:
+            await websocket.close(code=4001)
+            return
+    finally:
+        db.close()
+
+    await manager.connect(user_id, websocket)
+    try:
+        while True:
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        manager.disconnect(user_id, websocket)
 
 @app.post("/api/admin/login")
 async def admin_login(credentials: UserLogin):
@@ -463,13 +719,10 @@ async def get_user_dashboard(request: Request, authorization: Optional[str] = He
     try:
         latest_reading = db.query(EnergyReading).filter(EnergyReading.userId == user.user_id).order_by(EnergyReading.timestamp.desc()).first()
         latest_bill = db.query(Bill).filter(Bill.userId == user.user_id).order_by(Bill.generatedAt.desc()).first()
-        power_status = db.query(PowerControl).filter(PowerControl.userId == user.user_id).order_by(PowerControl.timestamp.desc()).first()
+        power_on = compute_power_status(db, user.user_id)
+        check_low_balance(db, user)
 
-        power_on = True
-        if latest_bill and latest_bill.status == "unpaid":
-            power_on = False
-        if power_status:
-            power_on = power_status.status == "ON"
+        
 
         return {
             "user": user.dict(),
@@ -554,11 +807,91 @@ async def pay_bill(payment: PaymentRequest, request: Request, authorization: Opt
             createdAt=datetime.now(timezone.utc),
         )
         db.add(notification)
+        send_push_to_user(db, iot_data.userId, "Power spike detected", f"+{power_increase:.0f}W. Tap to calibrate appliance.")
         db.commit()
         return {"message": "Payment successful", "newBalance": db_user.balance if db_user else user.balance}
     finally:
         db.close()
+        
+@app.post("/api/user/create-payment-order")
+async def create_payment_order(order_req: CreatePaymentOrderRequest, request: Request, authorization: Optional[str] = Header(None)):
+    user = await get_current_user(authorization, request)
+    db = SessionLocal()
+    try:
+        bill = db.query(Bill).filter(Bill.billId == order_req.billId, Bill.userId == user.user_id).first()
+        if not bill:
+            raise HTTPException(status_code=404, detail="Bill not found")
+        if bill.status == "paid":
+            raise HTTPException(status_code=400, detail="Bill already paid")
 
+        try:
+            razorpay_order = razorpay_client.order.create({
+                "amount": int(round(bill.amount * 100)),
+                "currency": "INR",
+                "receipt": bill.billId,
+                "payment_capture": 1,
+            })
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=f"Could not create payment order: {exc}")
+
+        return {
+            "orderId": razorpay_order["id"],
+            "amount": razorpay_order["amount"],
+            "currency": razorpay_order["currency"],
+            "keyId": RAZORPAY_KEY_ID,
+            "billId": bill.billId,
+        }
+    finally:
+        db.close()
+
+
+@app.post("/api/user/verify-payment")
+async def verify_payment(verify_req: VerifyPaymentRequest, request: Request, authorization: Optional[str] = Header(None)):
+    user = await get_current_user(authorization, request)
+    db = SessionLocal()
+    try:
+        bill = db.query(Bill).filter(Bill.billId == verify_req.billId, Bill.userId == user.user_id).first()
+        if not bill:
+            raise HTTPException(status_code=404, detail="Bill not found")
+        if bill.status == "paid":
+            raise HTTPException(status_code=400, detail="Bill already paid")
+
+        try:
+            razorpay_client.utility.verify_payment_signature({
+                "razorpay_order_id": verify_req.razorpay_order_id,
+                "razorpay_payment_id": verify_req.razorpay_payment_id,
+                "razorpay_signature": verify_req.razorpay_signature,
+            })
+        except razorpay.errors.SignatureVerificationError:
+            raise HTTPException(status_code=400, detail="Payment verification failed")
+
+        bill.status = "paid"
+        bill.paidAt = datetime.now(timezone.utc)
+
+        payment_record = Payment(
+            paymentId=verify_req.razorpay_payment_id,
+            userId=user.user_id,
+            billId=verify_req.billId,
+            amount=bill.amount,
+            paymentDate=datetime.now(timezone.utc),
+            method="razorpay",
+        )
+        db.add(payment_record)
+
+        db.add(Notification(
+            notifId=f"notif_{uuid.uuid4().hex[:12]}",
+            userId=user.user_id,
+            type="payment",
+            message=f"Payment of Rs.{bill.amount} received via Razorpay",
+            data=None,
+            isRead=False,
+            createdAt=datetime.now(timezone.utc),
+        ))
+        send_push_to_user(db, iot_data.userId, "Power spike detected", f"+{power_increase:.0f}W. Tap to calibrate appliance.")
+        db.commit()
+        return {"message": "Payment verified and bill marked as paid"}
+    finally:
+        db.close()       
 
 @app.get("/api/user/notifications")
 async def get_notifications(request: Request, authorization: Optional[str] = Header(None)):
@@ -611,6 +944,16 @@ async def receive_iot_data(iot_data: IoTData):
         db.add(reading)
         db.commit()
 
+        await manager.send_to_user(iot_data.userId, {
+            "type": "reading",
+            "voltage": reading.voltage,
+            "current": reading.current,
+            "power": reading.power,
+            "energy": reading.energy,
+            "timestamp": reading.timestamp.isoformat(),
+        })
+
+
         if last_reading and power_increase > 100:
             device = db.query(Device).filter(Device.userId == iot_data.userId).first()
             if device:
@@ -636,6 +979,7 @@ async def receive_iot_data(iot_data: IoTData):
                     createdAt=datetime.now(timezone.utc),
                 )
                 db.add(notification)
+                send_push_to_user(db, iot_data.userId, "Power spike detected", f"+{power_increase:.0f}W. Tap to calibrate appliance.")
 
         appliances = db.query(Appliance).filter(Appliance.userId == iot_data.userId, Appliance.notificationsEnabled.is_(True)).all()
         for appliance in appliances:
@@ -654,6 +998,7 @@ async def receive_iot_data(iot_data: IoTData):
                         createdAt=datetime.now(timezone.utc),
                     )
                     db.add(notif)
+                    send_push_to_user(db, iot_data.userId, f"{appliance.name} turned on", f"{iot_data.power:.0f}W")
 
         if iot_data.power > 5000:
             notification = Notification(
@@ -666,6 +1011,7 @@ async def receive_iot_data(iot_data: IoTData):
                 createdAt=datetime.now(timezone.utc),
             )
             db.add(notification)
+            send_push_to_user(db, iot_data.userId, "High power usage", f"{iot_data.power}W detected - check your appliances.")
 
         db.commit()
         return {
@@ -741,6 +1087,24 @@ async def control_power(user_id: str, control: PowerControlRequest, request: Req
     finally:
         db.close()
 
+@app.post("/api/admin/generate-bills")
+async def admin_generate_bills(request: Request, authorization: Optional[str] = Header(None)):
+    admin = await get_current_user(authorization, request)
+    if admin.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+
+    db = SessionLocal()
+    try:
+        users = db.query(DBUser).filter(DBUser.role == "user").all()
+        generated = 0
+        for user in users:
+            if generate_bill_for_user(db, user):
+                generated += 1
+        db.commit()
+    finally:
+        db.close()
+
+    return {"message": f"{generated} bill(s) generated"}
 
 @app.get("/api/admin/stats")
 async def get_admin_stats(request: Request, authorization: Optional[str] = Header(None)):
@@ -793,7 +1157,19 @@ async def update_global_tariff(new_rate: float, request: Request, authorization:
         return {"message": "Global tariff rate updated successfully", "newRate": new_rate, "usersAffected": len(users)}
     finally:
         db.close()
+        
+@app.get("/api/admin/user/{user_id}/power-status")
+async def get_user_power_status(user_id: str, request: Request, authorization: Optional[str] = Header(None)):
+    admin = await get_current_user(authorization, request)
+    if admin.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
 
+    db = SessionLocal()
+    try:
+        power_on = compute_power_status(db, user_id)
+        return {"powerStatus": "ON" if power_on else "OFF"}
+    finally:
+        db.close()
 
 @app.get("/api/admin/users/problematic")
 async def get_problematic_users(request: Request, authorization: Optional[str] = Header(None)):
@@ -885,6 +1261,7 @@ async def calibrate_appliance(appliance: ApplianceCalibration, request: Request,
         db.add(appliance_record)
         notification = Notification(notifId=f"notif_{uuid.uuid4().hex[:12]}", userId=user.user_id, type="appliance_calibrated", message=f"Appliance '{appliance.applianceName}' calibrated successfully", data=None, isRead=False, createdAt=datetime.now(timezone.utc))
         db.add(notification)
+        send_push_to_user(db, iot_data.userId, "Power spike detected", f"+{power_increase:.0f}W. Tap to calibrate appliance.")
         db.commit()
         return {"message": "Appliance calibrated successfully", "appliance": appliance_to_dict(appliance_record)}
     finally:

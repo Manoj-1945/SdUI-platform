@@ -30,13 +30,15 @@ export default function UserDetail() {
 
   const fetchUserData = async () => {
     try {
-      const [usersRes, consumptionRes] = await Promise.all([
+      const [usersRes, consumptionRes, powerRes] = await Promise.all([
         api.get('/api/admin/users'),
         api.get(`/api/admin/user/${userId}/consumption`),
+        api.get(`/api/admin/user/${userId}/power-status`),
       ]);
       const foundUser = usersRes.data.users.find((u: any) => u.user_id === userId);
       setUser(foundUser);
       setReadings(consumptionRes.data.readings);
+      setPowerOn(powerRes.data.powerStatus === 'ON');
     } catch (error: any) {
       Alert.alert('Error', error.response?.data?.detail || 'Failed to load user data');
     } finally {

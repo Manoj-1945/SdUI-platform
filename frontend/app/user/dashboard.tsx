@@ -12,6 +12,8 @@ import { useRouter } from 'expo-router';
 import { useAuthStore } from '../../src/store/authStore';
 import { Ionicons } from '@expo/vector-icons';
 import api from '../../src/utils/api';
+import { registerWebPush } from '../../src/utils/pushNotifications';
+import { useRealtimeReading } from '../../src/utils/useRealtimeReading';
 
 interface DashboardData {
   user: any;
@@ -36,13 +38,16 @@ export default function UserDashboard() {
   const [dashboardData, setDashboardData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [loadError, setLoadError] = useState(false);
 
   const fetchDashboard = async () => {
     try {
       const response = await api.get('/api/user/dashboard');
       setDashboardData(response.data);
+      setLoadError(false);
     } catch (error: any) {
       Alert.alert('Error', error.response?.data?.detail || 'Failed to load dashboard');
+      setLoadError(true);
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -51,10 +56,14 @@ export default function UserDashboard() {
 
   useEffect(() => {
     fetchDashboard();
-    // Refresh every 10 seconds for real-time updates
-    const interval = setInterval(fetchDashboard, 10000);
+    registerWebPush();
+    const interval = setInterval(fetchDashboard, 30000);
     return () => clearInterval(interval);
   }, []);
+
+  useRealtimeReading(user?.user_id, (reading) => {
+    setDashboardData((prev) => (prev ? { ...prev, currentReading: reading } : prev));
+  });
 
   const onRefresh = () => {
     setRefreshing(true);
@@ -74,10 +83,21 @@ export default function UserDashboard() {
     ]);
   };
 
-  if (loading) {
+ if (loading) {
     return (
       <View style={styles.container}>
         <Text style={styles.loadingText}>Loading...</Text>
+      </View>
+    );
+  }
+
+  if (loadError || !dashboardData) {
+    return (
+      <View style={styles.container}>
+        <Text style={styles.loadingText}>Couldn't load your dashboard.</Text>
+        <TouchableOpacity onPress={fetchDashboard} style={{ marginTop: 16, alignSelf: 'center' }}>
+          <Text style={{ color: '#4A90E2', fontSize: 16 }}>Tap to retry</Text>
+        </TouchableOpacity>
       </View>
     );
   }

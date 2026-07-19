@@ -6,6 +6,7 @@ import {
   ScrollView,
   TouchableOpacity,
   Alert,
+  Platform,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -31,33 +32,77 @@ export default function Billing() {
     }
   };
 
+  const loadRazorpayScript = (): Promise<boolean> => {
+    return new Promise((resolve) => {
+      if (typeof window === 'undefined') {
+        resolve(false);
+        return;
+      }
+      if ((window as any).Razorpay) {
+        resolve(true);
+        return;
+      }
+      const script = document.createElement('script');
+      script.src = 'https://checkout.razorpay.com/v1/checkout.js';
+      script.onload = () => resolve(true);
+      script.onerror = () => resolve(false);
+      document.body.appendChild(script);
+    });
+  };
+
   const handlePayBill = async (bill: any) => {
-    Alert.alert(
-      'Pay Bill',
-      `Pay ₹${bill.amount.toFixed(2)}?`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Pay Now',
-          onPress: async () => {
-            try {
-              const response = await api.post('/api/user/pay-bill', {
-                billId: bill.billId,
-                amount: bill.amount,
-              });
-              Alert.alert('Success', 'Payment successful!', [
-                {
-                  text: 'OK',
-                  onPress: () => fetchBills(),
-                },
-              ]);
-            } catch (error: any) {
-              Alert.alert('Payment Failed', error.response?.data?.detail || 'Failed to process payment');
-            }
-          },
+    if (Platform.OS !== 'web') {
+      Alert.alert('Not supported yet', 'Online payment is currently only available on the web app.');
+      return;
+    }
+
+    const scriptLoaded = await loadRazorpayScript();
+    if (!scriptLoaded) {
+      Alert.alert('Error', 'Could not load the payment gateway. Check your connection and try again.');
+      return;
+    }
+
+    try {
+      const orderRes = await api.post('/api/user/create-payment-order', { billId: bill.billId });
+      const { orderId, amount, currency, keyId } = orderRes.data;
+
+      const options = {
+        key: keyId,
+        amount,
+        currency,
+        name: 'Smart Energy Monitor',
+        description: `Bill payment - ${bill.billId}`,
+        order_id: orderId,
+        handler: async (response: any) => {
+          try {
+            await api.post('/api/user/verify-payment', {
+              billId: bill.billId,
+              razorpay_order_id: response.razorpay_order_id,
+              razorpay_payment_id: response.razorpay_payment_id,
+              razorpay_signature: response.razorpay_signature,
+            });
+            Alert.alert('Success', 'Payment successful!', [
+              { text: 'OK', onPress: () => fetchBills() },
+            ]);
+          } catch (error: any) {
+            Alert.alert(
+              'Verification Failed',
+              error.response?.data?.detail ||
+                'Payment could not be verified. If money was deducted, contact support.'
+            );
+          }
         },
-      ]
-    );
+        theme: { color: '#4A90E2' },
+      };
+
+      const rzp = new (window as any).Razorpay(options);
+      rzp.on('payment.failed', () => {
+        Alert.alert('Payment Failed', 'Your payment could not be completed. Please try again.');
+      });
+      rzp.open();
+    } catch (error: any) {
+      Alert.alert('Error', error.response?.data?.detail || 'Could not start payment');
+    }
   };
 
   return (
