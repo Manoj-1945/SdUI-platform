@@ -1,5 +1,33 @@
 import { Platform } from 'react-native';
+import * as Notifications from 'expo-notifications';
 import api from './api';
+
+Notifications.setNotificationHandler({
+  handleNotification: async () => ({
+    shouldShowAlert: true,
+    shouldPlaySound: false,
+    shouldSetBadge: false,
+  }),
+});
+
+export async function scheduleLowBalanceNotification(): Promise<void> {
+  const { status } = await Notifications.getPermissionsAsync();
+  if (status !== 'granted') {
+    const { status: newStatus } = await Notifications.requestPermissionsAsync();
+    if (newStatus !== 'granted') {
+      console.log('[push] Notification permissions not granted for low balance warning.');
+      return;
+    }
+  }
+
+  await Notifications.scheduleNotificationAsync({
+    content: {
+      title: 'Low Balance Warning',
+      body: 'Your smart meter balance is critically low. Please recharge soon to avoid disconnection.',
+    },
+    trigger: null, // immediately
+  });
+}
 
 function urlBase64ToUint8Array(base64String: string): Uint8Array {
   const padding = '='.repeat((4 - (base64String.length % 4)) % 4);

@@ -28,3 +28,4 @@ google-auth>=2.0.0
 pywebpush>=2.0.0
 websockets>=12.0
 fpdf2>=2.7.0
+apscheduler

@@ -12,7 +12,7 @@ import { useRouter } from 'expo-router';
 import { useAuthStore } from '../../src/store/authStore';
 import { Ionicons } from '@expo/vector-icons';
 import api from '../../src/utils/api';
-import { registerWebPush } from '../../src/utils/pushNotifications';
+import { registerWebPush, scheduleLowBalanceNotification } from '../../src/utils/pushNotifications';
 import { useRealtimeReading } from '../../src/utils/useRealtimeReading';
 
 interface DashboardData {
@@ -30,6 +30,15 @@ interface DashboardData {
   };
   powerStatus: string;
   balance: number;
+  usageInsights?: {
+    vsLastMonth: number;
+    vsRollingAvg: number;
+    hottestAppliance: {
+        name: string;
+        usage: number;
+    } | null;
+    isAutoRechargeEnabled: boolean;
+  }
 }
 
 export default function UserDashboard() {
@@ -39,6 +48,7 @@ export default function UserDashboard() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [loadError, setLoadError] = useState(false);
+  const [lowBalanceNotified, setLowBalanceNotified] = useState(false);
 
   const fetchDashboard = async () => {
     try {
@@ -60,6 +70,17 @@ export default function UserDashboard() {
     const interval = setInterval(fetchDashboard, 30000);
     return () => clearInterval(interval);
   }, []);
+
+  useEffect(() => {
+    if (!dashboardData) return;
+
+    if (dashboardData.balance < 100 && !lowBalanceNotified) {
+      scheduleLowBalanceNotification();
+      setLowBalanceNotified(true);
+    } else if (dashboardData.balance >= 100 && lowBalanceNotified) {
+      setLowBalanceNotified(false);
+    }
+  }, [dashboardData, lowBalanceNotified]);
 
   useRealtimeReading(user?.user_id, (reading) => {
     setDashboardData((prev) => (prev ? { ...prev, currentReading: reading } : prev));
@@ -103,6 +124,8 @@ export default function UserDashboard() {
   }
 
   const powerOn = dashboardData?.powerStatus === 'ON';
+  const insights = dashboardData?.usageInsights;
+
 
   return (
     <ScrollView
@@ -121,6 +144,22 @@ export default function UserDashboard() {
           <Ionicons name="log-out" size={28} color="#E74C3C" />
         </TouchableOpacity>
       </View>
+
+      {/* Low Balance Warning */}
+      {dashboardData?.balance < 100 && (
+        <TouchableOpacity
+          style={styles.lowBalanceCard}
+          onPress={() => router.push('/user/billing')}
+        >
+          <Ionicons name="warning" size={32} color="#FFF" />
+          <View style={styles.lowBalanceInfo}>
+            <Text style={styles.lowBalanceTitle}>Low Balance</Text>
+            <Text style={styles.lowBalanceText}>
+              Your account balance is running low. Please recharge to avoid service disruption.
+            </Text>
+          </View>
+        </TouchableOpacity>
+      )}
 
       {/* Power Status Card */}
       <View style={[styles.powerCard, powerOn ? styles.powerOn : styles.powerOff]}>
@@ -191,6 +230,38 @@ export default function UserDashboard() {
         </View>
       </View>
 
+      {/* Smart Insights */}
+      {insights && (
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Smart Insights</Text>
+          <View style={styles.insightsGrid}>
+            <View style={styles.insightCard}>
+              <Ionicons name="analytics" size={32} color="#4A90E2" />
+              <Text style={styles.insightValue}>
+                {insights.vsLastMonth > 0 ? `+${insights.vsLastMonth}`: insights.vsLastMonth}%
+              </Text>
+              <Text style={styles.insightLabel}>Usage vs. Last Month</Text>
+            </View>
+            {typeof insights.vsRollingAvg === 'number' && (
+                <View style={styles.insightCard}>
+                    <Ionicons name="podium-outline" size={32} color="#9B59B6" />
+                    <Text style={styles.insightValue}>
+                        {insights.vsRollingAvg > 0 ? `+${insights.vsRollingAvg}` : insights.vsRollingAvg}%
+                    </Text>
+                    <Text style={styles.insightLabel}>Usage vs. Rolling Avg</Text>
+                </View>
+            )}
+            {insights.hottestAppliance ? (
+              <View style={styles.insightCard}>
+                <Ionicons name="flame" size={32} color="#E74C3C" />
+                <Text style={styles.insightValue}>{insights.hottestAppliance.name}</Text>
+                <Text style={styles.insightLabel}>Consumption Hotspot</Text>
+              </View>
+            ) : null}
+          </view>
+        </View>
+      )}
+
       {/* Quick Actions */}
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>Quick Actions</Text>
@@ -209,6 +280,17 @@ export default function UserDashboard() {
             <Ionicons name="flash" size={32} color="#9B59B6" />
             <Text style={styles.actionText}>Calibrate</Text>
           </TouchableOpacity>
+          <TouchableOpacity
+              style={styles.actionButton}
+              onPress={() => router.push('/user/auto-recharge')}
+            >
+              <Ionicons
+                name={insights?.isAutoRechargeEnabled ? 'shield-checkmark' : 'shield-outline'}
+                size={32}
+                color={insights?.isAutoRechargeEnabled ? '#27AE60' : '#F39C12'}
+              />
+              <Text style={styles.actionText}>Auto-Recharge</Text>
+            </TouchableOpacity>
           <TouchableOpacity
             style={styles.actionButton}
             onPress={() => router.push('/user/appliances')}
@@ -305,6 +387,30 @@ const styles = StyleSheet.create({
   },
   powerWarning: {
     fontSize: 12,
+    color: '#FFFFFF',
+    marginTop: 4,
+    opacity: 0.9,
+  },
+  lowBalanceCard: {
+    flexDirection: 'row',
+    marginHorizontal: 24,
+    marginBottom: 24,
+    padding: 20,
+    borderRadius: 16,
+    alignItems: 'center',
+    backgroundColor: '#F39C12',
+  },
+  lowBalanceInfo: {
+    flex: 1,
+    marginLeft: 16,
+  },
+  lowBalanceTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#FFFFFF',
+  },
+  lowBalanceText: {
+    fontSize: 14,
     color: '#FFFFFF',
     marginTop: 4,
     opacity: 0.9,
@@ -406,5 +512,28 @@ const styles = StyleSheet.create({
     fontSize: 18,
     textAlign: 'center',
     marginTop: 100,
+  },
+  insightsGrid: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  insightCard: {
+    backgroundColor: '#1A1F3A',
+    borderRadius: 12,
+    padding: 16,
+    flex: 1,
+    alignItems: 'center',
+  },
+  insightValue: {
+    fontSize: 22,
+    fontWeight: 'bold',
+    color: '#FFFFFF',
+    marginTop: 8,
+  },
+  insightLabel: {
+    fontSize: 12,
+    color: '#8B9DC3',
+    marginTop: 4,
+    textAlign: 'center',
   },
 });

@@ -41,6 +41,10 @@ export default function Notifications() {
         return 'flash';
       case 'bill_due':
         return 'time';
+      case 'low_balance':
+        return 'wallet';
+      case 'auto_recharge_failed':
+        return 'alert-circle';
       default:
         return 'notifications';
     }
@@ -56,8 +60,21 @@ export default function Notifications() {
         return '#E74C3C';
       case 'bill_due':
         return '#4A90E2';
+      case 'low_balance':
+        return '#F39C12';
+      case 'auto_recharge_failed':
+        return '#E74C3C';
       default:
         return '#8B9DC3';
+    }
+  };
+
+  const markAllAsRead = async () => {
+    try {
+      await api.post('/api/user/notifications/mark-all-as-read');
+      fetchNotifications();
+    } catch (error) {
+      Alert.alert('Error', 'Could not mark notifications as read.');
     }
   };
 
@@ -68,7 +85,9 @@ export default function Notifications() {
           <Ionicons name="arrow-back" size={24} color="#FFF" />
         </TouchableOpacity>
         <Text style={styles.title}>Notifications</Text>
-        <View style={{ width: 24 }} />
+        <TouchableOpacity onPress={markAllAsRead}>
+          <Ionicons name="checkmark-done" size={24} color="#FFF" />
+        </TouchableOpacity>
       </View>
 
       <ScrollView style={styles.content}>
@@ -84,7 +103,7 @@ export default function Notifications() {
           notifications.map((notif, index) => (
             <View key={index} style={styles.notifCard}>
               <View style={[styles.iconContainer, { backgroundColor: getIconColor(notif.type) + '20' }]}>
-                <Ionicons name={getIcon(notif.type)} size={24} color={getIconColor(notif.type)} />
+                <Ionicons name={getIcon(notif.type) as any} size={24} color={getIconColor(notif.type)} />
               </View>
               <View style={styles.notifContent}>
                 <Text style={styles.notifMessage}>{notif.message}</Text>

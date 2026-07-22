@@ -15,21 +15,31 @@ import api from '../../src/utils/api';
 
 const screenWidth = Dimensions.get('window').width;
 
+type Period = 'daily' | 'weekly' | 'monthly';
+type Comparison = 'none' | 'lastMonth' | 'rollingAvg';
+
 export default function EnergyHistory() {
   const router = useRouter();
-  const [period, setPeriod] = useState<'daily' | 'weekly' | 'monthly'>('daily');
+  const [period, setPeriod] = useState<Period>('daily');
+  const [comparison, setComparison] = useState<Comparison>('none');
   const [readings, setReadings] = useState<any[]>([]);
+  const [comparisonReadings, setComparisonReadings] = useState<any[]>([]);
+  const [summary, setSummary] = useState<any>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     fetchHistory();
-  }, [period]);
+  }, [period, comparison]);
 
   const fetchHistory = async () => {
     setLoading(true);
     try {
-      const response = await api.get(`/api/user/energy-history?period=${period}`);
+      const response = await api.get(
+        `/api/user/energy-history?period=${period}&comparison=${comparison}`
+      );
       setReadings(response.data.readings);
+      setComparisonReadings(response.data.comparisonReadings || []);
+      setSummary(response.data.summary || null);
     } catch (error: any) {
       Alert.alert('Error', error.response?.data?.detail || 'Failed to load history');
     } finally {
@@ -47,10 +57,20 @@ export default function EnergyHistory() {
 
     const labels = readings.slice(-10).map((r, i) => `${i + 1}`);
     const data = readings.slice(-10).map((r) => r.energy || 0);
+    const datasets = [{ data, color: () => '#4A90E2', strokeWidth: 2 }];
+
+    if (comparison !== 'none' && comparisonReadings.length > 0) {
+      const comparisonData = comparisonReadings.slice(-10).map((r) => r.energy || 0);
+      datasets.push({
+        data: comparisonData,
+        color: () => '#E74C3C',
+        strokeWidth: 1,
+      });
+    }
 
     return {
       labels,
-      datasets: [{ data, color: () => '#4A90E2' }],
+      datasets,
     };
   };
 
@@ -64,31 +84,39 @@ export default function EnergyHistory() {
         <View style={{ width: 24 }} />
       </View>
 
-      <View style={styles.periodSelector}>
-        <TouchableOpacity
-          style={[styles.periodButton, period === 'daily' && styles.periodButtonActive]}
-          onPress={() => setPeriod('daily')}
-        >
-          <Text style={[styles.periodText, period === 'daily' && styles.periodTextActive]}>
-            Daily
-          </Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.periodButton, period === 'weekly' && styles.periodButtonActive]}
-          onPress={() => setPeriod('weekly')}
-        >
-          <Text style={[styles.periodText, period === 'weekly' && styles.periodTextActive]}>
-            Weekly
-          </Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.periodButton, period === 'monthly' && styles.periodButtonActive]}
-          onPress={() => setPeriod('monthly')}
-        >
-          <Text style={[styles.periodText, period === 'monthly' && styles.periodTextActive]}>
-            Monthly
-          </Text>
-        </TouchableOpacity>
+      <View style={styles.selectors}>
+        <View style={styles.periodSelector}>
+          {(['daily', 'weekly', 'monthly'] as Period[]).map((p) => (
+            <TouchableOpacity
+              key={p}
+              style={[styles.periodButton, period === p && styles.periodButtonActive]}
+              onPress={() => setPeriod(p)}
+            >
+              <Text style={[styles.periodText, period === p && styles.periodTextActive]}>
+                {p.charAt(0).toUpperCase() + p.slice(1)}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+        <View style={styles.periodSelector}>
+          {(
+            [
+              ['none', 'No Comparison'],
+              ['lastMonth', 'Vs. Last Month'],
+              ['rollingAvg', 'Vs. Rolling Avg'],
+            ] as [Comparison, string][]
+          ).map(([c, text]) => (
+            <TouchableOpacity
+              key={c}
+              style={[styles.periodButton, comparison === c && styles.periodButtonActive]}
+              onPress={() => setComparison(c)}
+            >
+              <Text style={[styles.periodText, comparison === c && styles.periodTextActive]}>
+                {text}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
       </View>
 
       <ScrollView style={styles.content}>
@@ -108,46 +136,36 @@ export default function EnergyHistory() {
                 data={getChartData()}
                 width={screenWidth - 48}
                 height={220}
-                chartConfig={{
-                  backgroundColor: '#1A1F3A',
-                  backgroundGradientFrom: '#1A1F3A',
-                  backgroundGradientTo: '#1A1F3A',
-                  decimalPlaces: 2,
-                  color: (opacity = 1) => `rgba(74, 144, 226, ${opacity})`,
-                  labelColor: (opacity = 1) => `rgba(139, 157, 195, ${opacity})`,
-                  style: {
-                    borderRadius: 16,
-                  },
-                  propsForDots: {
-                    r: '4',
-                    strokeWidth: '2',
-                    stroke: '#4A90E2',
-                  },
-                }}
+                chartConfig={chartConfig}
                 bezier
                 style={styles.chart}
               />
             </View>
 
-            <View style={styles.statsCard}>
-              <Text style={styles.statsTitle}>Statistics</Text>
-              <View style={styles.statRow}>
-                <Text style={styles.statLabel}>Total Readings:</Text>
-                <Text style={styles.statValue}>{readings.length}</Text>
+            {summary && (
+              <View style={styles.statsCard}>
+                <Text style={styles.statsTitle}>Comparison Summary</Text>
+                <View style={styles.statRow}>
+                  <Text style={styles.statLabel}>Current Period Avg:</Text>
+                  <Text style={styles.statValue}>{summary.currentAvg.toFixed(2)} kWh</Text>
+                </View>
+                <View style={styles.statRow}>
+                  <Text style={styles.statLabel}>Comparison Avg:</Text>
+                  <Text style={styles.statValue}>{summary.comparisonAvg.toFixed(2)} kWh</Text>
+                </View>
+                <View style={styles.statRow}>
+                  <Text style={styles.statLabel}>Change:</Text>
+                  <Text
+                    style={[
+                      styles.statValue,
+                      summary.changePercent >= 0 ? styles.positiveChange : styles.negativeChange,
+                    ]}
+                  >
+                    {summary.changePercent.toFixed(2)}%
+                  </Text>
+                </View>
               </View>
-              <View style={styles.statRow}>
-                <Text style={styles.statLabel}>Avg Energy:</Text>
-                <Text style={styles.statValue}>
-                  {(readings.reduce((sum, r) => sum + (r.energy || 0), 0) / readings.length).toFixed(2)} kWh
-                </Text>
-              </View>
-              <View style={styles.statRow}>
-                <Text style={styles.statLabel}>Peak Power:</Text>
-                <Text style={styles.statValue}>
-                  {Math.max(...readings.map(r => r.power || 0)).toFixed(0)} W
-                </Text>
-              </View>
-            </View>
+            )}
 
             <View style={styles.readingsList}>
               <Text style={styles.listTitle}>Recent Readings</Text>
@@ -173,6 +191,23 @@ export default function EnergyHistory() {
   );
 }
 
+const chartConfig = {
+  backgroundColor: '#1A1F3A',
+  backgroundGradientFrom: '#1A1F3A',
+  backgroundGradientTo: '#1A1F3A',
+  decimalPlaces: 2,
+  color: (opacity = 1) => `rgba(74, 144, 226, ${opacity})`,
+  labelColor: (opacity = 1) => `rgba(139, 157, 195, ${opacity})`,
+  style: {
+    borderRadius: 16,
+  },
+  propsForDots: {
+    r: '4',
+    strokeWidth: '2',
+    stroke: '#4A90E2',
+  },
+};
+
 const styles = StyleSheet.create({
   container: {
     flex: 1,
@@ -190,10 +225,12 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     color: '#FFFFFF',
   },
+  selectors: {
+    paddingHorizontal: 24,
+    gap: 8,
+  },
   periodSelector: {
     flexDirection: 'row',
-    padding: 24,
-    paddingTop: 0,
     gap: 8,
   },
   periodButton: {
@@ -217,7 +254,7 @@ const styles = StyleSheet.create({
   content: {
     flex: 1,
     padding: 24,
-    paddingTop: 0,
+    paddingTop: 16,
   },
   loadingText: {
     color: '#8B9DC3',
@@ -265,7 +302,7 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 16,
     fontWeight: '600',
-    marginBottom: 16,
+    marginBottom: 16,.
   },
   statRow: {
     flexDirection: 'row',
@@ -280,6 +317,12 @@ const styles = StyleSheet.create({
     color: '#4A90E2',
     fontSize: 14,
     fontWeight: '600',
+  },
+  positiveChange: {
+    color: '#E74C3C',
+  },
+  negativeChange: {
+    color: '#27AE60',
   },
   readingsList: {
     marginBottom: 24,
