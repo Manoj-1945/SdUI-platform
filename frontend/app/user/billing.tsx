@@ -275,11 +275,11 @@ export default function Billing() {
       marginTop: 8,
     },
     billCard: {
-      backgroundColor: '#1A1F3A',
-      borderRadius: 16,
-  .
-  .
-  .
+    backgroundColor: '#1A1F3A',
+    borderRadius: 16,
+    padding: 20,
+    marginBottom: 16,
+  },
     payButtonText: {
       color: '#FFFFFF',
       fontSize: 16,
