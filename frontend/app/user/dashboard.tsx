@@ -258,7 +258,7 @@ export default function UserDashboard() {
                 <Text style={styles.insightLabel}>Consumption Hotspot</Text>
               </View>
             ) : null}
-          </view>
+          </View>
         </View>
       )}
 

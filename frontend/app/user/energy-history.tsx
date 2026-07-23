@@ -302,7 +302,7 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 16,
     fontWeight: '600',
-    marginBottom: 16,.
+    marginBottom: 16,
   },
   statRow: {
     flexDirection: 'row',
