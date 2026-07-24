@@ -7,6 +7,7 @@ import {
   TouchableOpacity,
   RefreshControl,
   Alert,
+  Dimensions,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useAuthStore } from '../../src/store/authStore';
@@ -14,6 +15,11 @@ import { Ionicons } from '@expo/vector-icons';
 import api from '../../src/utils/api';
 import { registerWebPush, scheduleLowBalanceNotification } from '../../src/utils/pushNotifications';
 import { useRealtimeReading } from '../../src/utils/useRealtimeReading';
+import { colors, fonts, radii, spacing } from '../../src/theme/tokens';
+import PowerGauge from '../../src/components/PowerGauge';
+import CircuitPattern from '../../src/components/CircuitPattern';
+
+const screenWidth = Dimensions.get('window').width;
 
 interface DashboardData {
   user: any;
@@ -104,7 +110,7 @@ export default function UserDashboard() {
     ]);
   };
 
- if (loading) {
+  if (loading) {
     return (
       <View style={styles.container}>
         <Text style={styles.loadingText}>Loading...</Text>
@@ -117,7 +123,7 @@ export default function UserDashboard() {
       <View style={styles.container}>
         <Text style={styles.loadingText}>Couldn't load your dashboard.</Text>
         <TouchableOpacity onPress={fetchDashboard} style={{ marginTop: 16, alignSelf: 'center' }}>
-          <Text style={{ color: '#4A90E2', fontSize: 16 }}>Tap to retry</Text>
+          <Text style={{ color: colors.current, fontSize: 16, fontFamily: fonts.body }}>Tap to retry</Text>
         </TouchableOpacity>
       </View>
     );
@@ -126,23 +132,32 @@ export default function UserDashboard() {
   const powerOn = dashboardData?.powerStatus === 'ON';
   const insights = dashboardData?.usageInsights;
 
-
   return (
     <ScrollView
       style={styles.container}
       refreshControl={
-        <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#4A90E2" />
+        <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.current} />
       }
     >
-      {/* Header */}
-      <View style={styles.header}>
-        <View>
-          <Text style={styles.greeting}>Welcome back,</Text>
-          <Text style={styles.userName}>{user?.name}</Text>
+      {/* Header with circuit-trace texture */}
+      <View style={styles.hero}>
+        <CircuitPattern width={screenWidth} height={340} />
+        <View style={styles.header}>
+          <View>
+            <Text style={styles.greeting}>WELCOME BACK</Text>
+            <Text style={styles.userName}>{user?.name}</Text>
+          </View>
+          <TouchableOpacity onPress={handleLogout} style={styles.logoutButton}>
+            <Ionicons name="log-out-outline" size={22} color={colors.signal} />
+          </TouchableOpacity>
         </View>
-        <TouchableOpacity onPress={handleLogout}>
-          <Ionicons name="log-out" size={28} color="#E74C3C" />
-        </TouchableOpacity>
+
+        {/* Signature element: live animated power gauge */}
+        <View style={styles.gaugeWrap}>
+          <PowerGauge watts={dashboardData?.currentReading.power ?? 0} />
+          <View style={[styles.liveDot, { backgroundColor: powerOn ? colors.current : colors.signal }]} />
+          <Text style={styles.liveLabel}>{powerOn ? 'LIVE' : 'DISCONNECTED'}</Text>
+        </View>
       </View>
 
       {/* Low Balance Warning */}
@@ -151,24 +166,26 @@ export default function UserDashboard() {
           style={styles.lowBalanceCard}
           onPress={() => router.push('/user/billing')}
         >
-          <Ionicons name="warning" size={32} color="#FFF" />
+          <Ionicons name="warning" size={26} color={colors.void} />
           <View style={styles.lowBalanceInfo}>
-            <Text style={styles.lowBalanceTitle}>Low Balance</Text>
+            <Text style={styles.lowBalanceTitle}>Low balance</Text>
             <Text style={styles.lowBalanceText}>
-              Your account balance is running low. Please recharge to avoid service disruption.
+              Recharge soon to avoid service disruption.
             </Text>
           </View>
         </TouchableOpacity>
       )}
 
       {/* Power Status Card */}
-      <View style={[styles.powerCard, powerOn ? styles.powerOn : styles.powerOff]}>
-        <View style={styles.powerIconContainer}>
-          <Ionicons name="flash" size={40} color="#FFF" />
+      <View style={[styles.powerCard, powerOn ? styles.powerOnBorder : styles.powerOffBorder]}>
+        <View style={[styles.powerIconContainer, { backgroundColor: powerOn ? colors.current + '22' : colors.signal + '22' }]}>
+          <Ionicons name="flash" size={28} color={powerOn ? colors.current : colors.signal} />
         </View>
         <View style={styles.powerInfo}>
-          <Text style={styles.powerLabel}>Power Status</Text>
-          <Text style={styles.powerStatus}>{powerOn ? 'CONNECTED' : 'DISCONNECTED'}</Text>
+          <Text style={styles.powerLabel}>Power status</Text>
+          <Text style={[styles.powerStatus, { color: powerOn ? colors.current : colors.signal }]}>
+            {powerOn ? 'CONNECTED' : 'DISCONNECTED'}
+          </Text>
           {!powerOn && (
             <Text style={styles.powerWarning}>Bill payment required</Text>
           )}
@@ -177,37 +194,37 @@ export default function UserDashboard() {
 
       {/* Live Readings */}
       <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Live Readings</Text>
+        <Text style={styles.sectionTitle}>Live readings</Text>
         <View style={styles.readingsGrid}>
           <View style={styles.readingCard}>
-            <Ionicons name="flash" size={32} color="#FFD700" />
-            <Text style={styles.readingValue}>{dashboardData?.currentReading.voltage.toFixed(1)}V</Text>
+            <Ionicons name="flash-outline" size={24} color={colors.copper} />
+            <Text style={styles.readingValue}>{dashboardData?.currentReading.voltage.toFixed(1)}<Text style={styles.readingUnit}> V</Text></Text>
             <Text style={styles.readingLabel}>Voltage</Text>
           </View>
           <View style={styles.readingCard}>
-            <Ionicons name="trending-up" size={32} color="#4A90E2" />
-            <Text style={styles.readingValue}>{dashboardData?.currentReading.current.toFixed(2)}A</Text>
+            <Ionicons name="pulse-outline" size={24} color={colors.current} />
+            <Text style={styles.readingValue}>{dashboardData?.currentReading.current.toFixed(2)}<Text style={styles.readingUnit}> A</Text></Text>
             <Text style={styles.readingLabel}>Current</Text>
           </View>
           <View style={styles.readingCard}>
-            <Ionicons name="speedometer" size={32} color="#E74C3C" />
-            <Text style={styles.readingValue}>{dashboardData?.currentReading.power.toFixed(0)}W</Text>
+            <Ionicons name="speedometer-outline" size={24} color={colors.signal} />
+            <Text style={styles.readingValue}>{dashboardData?.currentReading.power.toFixed(0)}<Text style={styles.readingUnit}> W</Text></Text>
             <Text style={styles.readingLabel}>Power</Text>
           </View>
           <View style={styles.readingCard}>
-            <Ionicons name="battery-charging" size={32} color="#27AE60" />
-            <Text style={styles.readingValue}>{dashboardData?.currentReading.energy.toFixed(2)}</Text>
-            <Text style={styles.readingLabel}>Energy (kWh)</Text>
+            <Ionicons name="battery-charging-outline" size={24} color={colors.success} />
+            <Text style={styles.readingValue}>{dashboardData?.currentReading.energy.toFixed(2)}<Text style={styles.readingUnit}> kWh</Text></Text>
+            <Text style={styles.readingLabel}>Energy</Text>
           </View>
         </View>
       </View>
 
       {/* Billing Info */}
       <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Current Billing</Text>
+        <Text style={styles.sectionTitle}>Current billing</Text>
         <View style={styles.billingCard}>
           <View style={styles.billingRow}>
-            <Text style={styles.billingLabel}>Current Bill</Text>
+            <Text style={styles.billingLabel}>Current bill</Text>
             <Text style={styles.billingAmount}>₹{dashboardData?.currentBill.amount.toFixed(2)}</Text>
           </View>
           <View style={styles.billingRow}>
@@ -233,29 +250,29 @@ export default function UserDashboard() {
       {/* Smart Insights */}
       {insights && (
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Smart Insights</Text>
+          <Text style={styles.sectionTitle}>Smart insights</Text>
           <View style={styles.insightsGrid}>
             <View style={styles.insightCard}>
-              <Ionicons name="analytics" size={32} color="#4A90E2" />
+              <Ionicons name="analytics-outline" size={26} color={colors.current} />
               <Text style={styles.insightValue}>
                 {insights.vsLastMonth > 0 ? `+${insights.vsLastMonth}`: insights.vsLastMonth}%
               </Text>
-              <Text style={styles.insightLabel}>Usage vs. Last Month</Text>
+              <Text style={styles.insightLabel}>vs. last month</Text>
             </View>
             {typeof insights.vsRollingAvg === 'number' && (
                 <View style={styles.insightCard}>
-                    <Ionicons name="podium-outline" size={32} color="#9B59B6" />
+                    <Ionicons name="podium-outline" size={26} color={colors.copper} />
                     <Text style={styles.insightValue}>
                         {insights.vsRollingAvg > 0 ? `+${insights.vsRollingAvg}` : insights.vsRollingAvg}%
                     </Text>
-                    <Text style={styles.insightLabel}>Usage vs. Rolling Avg</Text>
+                    <Text style={styles.insightLabel}>vs. rolling avg</Text>
                 </View>
             )}
             {insights.hottestAppliance ? (
               <View style={styles.insightCard}>
-                <Ionicons name="flame" size={32} color="#E74C3C" />
+                <Ionicons name="flame-outline" size={26} color={colors.signal} />
                 <Text style={styles.insightValue}>{insights.hottestAppliance.name}</Text>
-                <Text style={styles.insightLabel}>Consumption Hotspot</Text>
+                <Text style={styles.insightLabel}>Consumption hotspot</Text>
               </View>
             ) : null}
           </View>
@@ -264,20 +281,20 @@ export default function UserDashboard() {
 
       {/* Quick Actions */}
       <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Quick Actions</Text>
+        <Text style={styles.sectionTitle}>Quick actions</Text>
         <View style={styles.actionsGrid}>
           <TouchableOpacity
             style={styles.actionButton}
             onPress={() => router.push('/user/device-setup')}
           >
-            <Ionicons name="hardware-chip" size={32} color="#FFD700" />
-            <Text style={styles.actionText}>Add Device</Text>
+            <Ionicons name="hardware-chip-outline" size={26} color={colors.copper} />
+            <Text style={styles.actionText}>Add device</Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={styles.actionButton}
             onPress={() => router.push('/user/calibration')}
           >
-            <Ionicons name="flash" size={32} color="#9B59B6" />
+            <Ionicons name="flash-outline" size={26} color={colors.current} />
             <Text style={styles.actionText}>Calibrate</Text>
           </TouchableOpacity>
           <TouchableOpacity
@@ -285,46 +302,46 @@ export default function UserDashboard() {
               onPress={() => router.push('/user/auto-recharge')}
             >
               <Ionicons
-                name={insights?.isAutoRechargeEnabled ? 'shield-checkmark' : 'shield-outline'}
-                size={32}
-                color={insights?.isAutoRechargeEnabled ? '#27AE60' : '#F39C12'}
+                name={insights?.isAutoRechargeEnabled ? 'shield-checkmark-outline' : 'shield-outline'}
+                size={26}
+                color={insights?.isAutoRechargeEnabled ? colors.success : colors.mist}
               />
-              <Text style={styles.actionText}>Auto-Recharge</Text>
+              <Text style={styles.actionText}>Auto-recharge</Text>
             </TouchableOpacity>
           <TouchableOpacity
             style={styles.actionButton}
             onPress={() => router.push('/user/appliances')}
           >
-            <Ionicons name="apps" size={32} color="#27AE60" />
+            <Ionicons name="apps-outline" size={26} color={colors.success} />
             <Text style={styles.actionText}>Appliances</Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={styles.actionButton}
             onPress={() => router.push('/user/energy-history')}
           >
-            <Ionicons name="bar-chart" size={32} color="#4A90E2" />
-            <Text style={styles.actionText}>Energy History</Text>
+            <Ionicons name="bar-chart-outline" size={26} color={colors.current} />
+            <Text style={styles.actionText}>Energy history</Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={styles.actionButton}
             onPress={() => router.push('/user/billing')}
           >
-            <Ionicons name="receipt" size={32} color="#27AE60" />
+            <Ionicons name="receipt-outline" size={26} color={colors.copper} />
             <Text style={styles.actionText}>Bills</Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={styles.actionButton}
             onPress={() => router.push('/user/notifications')}
           >
-            <Ionicons name="notifications" size={32} color="#F39C12" />
+            <Ionicons name="notifications-outline" size={26} color={colors.signal} />
             <Text style={styles.actionText}>Notifications</Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={styles.actionButton}
             onPress={() => router.push('/user/predicted-bill')}
           >
-            <Ionicons name="bulb" size={32} color="#9B59B6" />
-            <Text style={styles.actionText}>AI Prediction</Text>
+            <Ionicons name="bulb-outline" size={26} color={colors.copper} />
+            <Text style={styles.actionText}>AI prediction</Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -335,95 +352,131 @@ export default function UserDashboard() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#0A0E27',
+    backgroundColor: colors.void,
+  },
+  hero: {
+    paddingTop: 60,
+    paddingBottom: spacing.lg,
+    overflow: 'hidden',
   },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: 24,
-    paddingTop: 60,
+    alignItems: 'flex-start',
+    paddingHorizontal: spacing.lg,
   },
   greeting: {
-    fontSize: 16,
-    color: '#8B9DC3',
+    fontFamily: fonts.mono,
+    fontSize: 11,
+    letterSpacing: 2,
+    color: colors.mist,
   },
   userName: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: '#FFFFFF',
+    fontFamily: fonts.displayBold,
+    fontSize: 26,
+    color: colors.white,
     marginTop: 4,
+  },
+  logoutButton: {
+    padding: 8,
+    borderRadius: radii.full,
+    backgroundColor: colors.circuit,
+  },
+  gaugeWrap: {
+    alignItems: 'center',
+    marginTop: spacing.lg,
+  },
+  liveDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    marginTop: spacing.md,
+  },
+  liveLabel: {
+    fontFamily: fonts.mono,
+    fontSize: 11,
+    letterSpacing: 2,
+    color: colors.mist,
+    marginTop: 6,
+  },
+  lowBalanceCard: {
+    flexDirection: 'row',
+    marginHorizontal: spacing.lg,
+    marginBottom: spacing.lg,
+    padding: spacing.md,
+    borderRadius: radii.md,
+    alignItems: 'center',
+    backgroundColor: colors.copper,
+  },
+  lowBalanceInfo: {
+    flex: 1,
+    marginLeft: spacing.md,
+  },
+  lowBalanceTitle: {
+    fontFamily: fonts.display,
+    fontSize: 16,
+    color: colors.void,
+  },
+  lowBalanceText: {
+    fontFamily: fonts.body,
+    fontSize: 13,
+    color: colors.void,
+    marginTop: 2,
+    opacity: 0.85,
   },
   powerCard: {
     flexDirection: 'row',
-    margin: 24,
-    marginTop: 0,
-    padding: 20,
-    borderRadius: 16,
+    marginHorizontal: spacing.lg,
+    marginBottom: spacing.lg,
+    padding: spacing.md,
+    borderRadius: radii.md,
     alignItems: 'center',
+    backgroundColor: colors.circuit,
+    borderWidth: 1,
   },
-  powerOn: {
-    backgroundColor: '#27AE60',
+  powerOnBorder: {
+    borderColor: colors.current + '55',
   },
-  powerOff: {
-    backgroundColor: '#E74C3C',
+  powerOffBorder: {
+    borderColor: colors.signal + '55',
   },
   powerIconContainer: {
-    marginRight: 16,
+    width: 48,
+    height: 48,
+    borderRadius: radii.full,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: spacing.md,
   },
   powerInfo: {
     flex: 1,
   },
   powerLabel: {
-    fontSize: 14,
-    color: '#FFFFFF',
-    opacity: 0.8,
+    fontFamily: fonts.mono,
+    fontSize: 11,
+    letterSpacing: 1,
+    color: colors.mist,
   },
   powerStatus: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: '#FFFFFF',
-    marginTop: 4,
+    fontFamily: fonts.display,
+    fontSize: 20,
+    marginTop: 2,
   },
   powerWarning: {
+    fontFamily: fonts.body,
     fontSize: 12,
-    color: '#FFFFFF',
+    color: colors.signal,
     marginTop: 4,
-    opacity: 0.9,
-  },
-  lowBalanceCard: {
-    flexDirection: 'row',
-    marginHorizontal: 24,
-    marginBottom: 24,
-    padding: 20,
-    borderRadius: 16,
-    alignItems: 'center',
-    backgroundColor: '#F39C12',
-  },
-  lowBalanceInfo: {
-    flex: 1,
-    marginLeft: 16,
-  },
-  lowBalanceTitle: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#FFFFFF',
-  },
-  lowBalanceText: {
-    fontSize: 14,
-    color: '#FFFFFF',
-    marginTop: 4,
-    opacity: 0.9,
   },
   section: {
-    padding: 24,
-    paddingTop: 0,
+    paddingHorizontal: spacing.lg,
+    marginBottom: spacing.md,
   },
   sectionTitle: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#FFFFFF',
-    marginBottom: 16,
+    fontFamily: fonts.display,
+    fontSize: 16,
+    color: colors.white,
+    marginBottom: spacing.md,
   },
   readingsGrid: {
     flexDirection: 'row',
@@ -431,63 +484,72 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   readingCard: {
-    backgroundColor: '#1A1F3A',
-    borderRadius: 12,
-    padding: 16,
+    backgroundColor: colors.circuit,
+    borderRadius: radii.md,
+    padding: spacing.md,
     width: '48%',
-    alignItems: 'center',
+    alignItems: 'flex-start',
   },
   readingValue: {
+    fontFamily: fonts.displayBold,
     fontSize: 22,
-    fontWeight: 'bold',
-    color: '#FFFFFF',
-    marginTop: 8,
+    color: colors.white,
+    marginTop: spacing.sm,
+  },
+  readingUnit: {
+    fontFamily: fonts.mono,
+    fontSize: 13,
+    color: colors.mist,
   },
   readingLabel: {
-    fontSize: 12,
-    color: '#8B9DC3',
+    fontFamily: fonts.mono,
+    fontSize: 10,
+    letterSpacing: 1,
+    color: colors.mist,
     marginTop: 4,
   },
   billingCard: {
-    backgroundColor: '#1A1F3A',
-    borderRadius: 12,
-    padding: 20,
+    backgroundColor: colors.circuit,
+    borderRadius: radii.md,
+    padding: spacing.md,
   },
   billingRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 16,
+    marginBottom: spacing.md,
   },
   billingLabel: {
-    fontSize: 16,
-    color: '#8B9DC3',
+    fontFamily: fonts.body,
+    fontSize: 14,
+    color: colors.mist,
   },
   billingAmount: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#4A90E2',
+    fontFamily: fonts.displayBold,
+    fontSize: 18,
+    color: colors.copper,
   },
   balanceAmount: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#27AE60',
+    fontFamily: fonts.displayBold,
+    fontSize: 18,
+    color: colors.current,
   },
   statusBadge: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: radii.sm,
   },
   statusPaid: {
-    backgroundColor: '#27AE60',
+    backgroundColor: colors.success,
   },
   statusUnpaid: {
-    backgroundColor: '#E74C3C',
+    backgroundColor: colors.signal,
   },
   statusText: {
-    color: '#FFFFFF',
-    fontSize: 12,
-    fontWeight: 'bold',
+    fontFamily: fonts.mono,
+    color: colors.void,
+    fontSize: 11,
+    letterSpacing: 0.5,
   },
   actionsGrid: {
     flexDirection: 'row',
@@ -495,21 +557,23 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   actionButton: {
-    backgroundColor: '#1A1F3A',
-    borderRadius: 12,
-    padding: 20,
+    backgroundColor: colors.circuit,
+    borderRadius: radii.md,
+    padding: spacing.md,
     width: '48%',
     alignItems: 'center',
   },
   actionText: {
-    color: '#FFFFFF',
-    fontSize: 14,
-    marginTop: 8,
+    fontFamily: fonts.body,
+    color: colors.white,
+    fontSize: 13,
+    marginTop: spacing.sm,
     textAlign: 'center',
   },
   loadingText: {
-    color: '#FFFFFF',
-    fontSize: 18,
+    fontFamily: fonts.body,
+    color: colors.white,
+    fontSize: 16,
     textAlign: 'center',
     marginTop: 100,
   },
@@ -518,21 +582,22 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   insightCard: {
-    backgroundColor: '#1A1F3A',
-    borderRadius: 12,
-    padding: 16,
+    backgroundColor: colors.circuit,
+    borderRadius: radii.md,
+    padding: spacing.md,
     flex: 1,
     alignItems: 'center',
   },
   insightValue: {
-    fontSize: 22,
-    fontWeight: 'bold',
-    color: '#FFFFFF',
-    marginTop: 8,
+    fontFamily: fonts.displayBold,
+    fontSize: 18,
+    color: colors.white,
+    marginTop: spacing.sm,
   },
   insightLabel: {
-    fontSize: 12,
-    color: '#8B9DC3',
+    fontFamily: fonts.mono,
+    fontSize: 9,
+    color: colors.mist,
     marginTop: 4,
     textAlign: 'center',
   },
