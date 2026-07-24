@@ -1,11 +1,35 @@
 import { Stack } from 'expo-router';
+import { useFonts, ChakraPetch_400Regular, ChakraPetch_600SemiBold, ChakraPetch_700Bold } from '@expo-google-fonts/chakra-petch';
+import { SpaceMono_400Regular } from '@expo-google-fonts/space-mono';
+import * as SplashScreen from 'expo-splash-screen';
+import { useEffect } from 'react';
+import { colors } from '../src/theme/tokens';
+
+SplashScreen.preventAutoHideAsync();
 
 export default function RootLayout() {
+  const [fontsLoaded] = useFonts({
+    ChakraPetch_400Regular,
+    ChakraPetch_600SemiBold,
+    ChakraPetch_700Bold,
+    SpaceMono_400Regular,
+  });
+
+  useEffect(() => {
+    if (fontsLoaded) {
+      SplashScreen.hideAsync();
+    }
+  }, [fontsLoaded]);
+
+  if (!fontsLoaded) {
+    return null;
+  }
+
   return (
     <Stack
       screenOptions={{
         headerShown: false,
-        contentStyle: { backgroundColor: '#0A0E27' },
+        contentStyle: { backgroundColor: colors.void },
       }}
     >
       <Stack.Screen name="index" />
@@ -20,6 +44,7 @@ export default function RootLayout() {
       <Stack.Screen name="user/device-setup" />
       <Stack.Screen name="user/calibration" />
       <Stack.Screen name="user/appliances" />
+      <Stack.Screen name="user/auto-recharge" />
       <Stack.Screen name="admin/dashboard" />
       <Stack.Screen name="admin/user-detail" />
     </Stack>

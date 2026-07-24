@@ -134,6 +134,15 @@ class PushSubscription(Base):
     platform = Column(String, nullable=False)  # "web" or "native"
     token = Column(Text, nullable=False)
     createdAt = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    
+class AutoRechargeSettings(Base):
+    __tablename__ = "auto_recharge_settings"
+    id = Column(Integer, primary_key=True)
+    userId = Column(String, unique=True, nullable=False, index=True)
+    enabled = Column(Boolean, default=False)
+    rechargeAmount = Column(Float, default=500.0)
+    threshold = Column(Float, default=100.0)
+    updatedAt = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
 class PowerControl(Base):
     __tablename__ = "power_control"
@@ -400,28 +409,49 @@ def compute_power_status(db, user_id: str) -> bool:
 LOW_BALANCE_THRESHOLD = 100.0
 
 
-def check_low_balance(db, user):
-    if user.balance >= LOW_BALANCE_THRESHOLD:
-        return
+def check_balance_and_recharge(db, user) -> float:
+    db_user = db.query(DBUser).filter(DBUser.user_id == user.user_id).first()
+    if not db_user:
+        return user.balance
+
+    if db_user.balance >= LOW_BALANCE_THRESHOLD:
+        return db_user.balance
+
+    settings = db.query(AutoRechargeSettings).filter(AutoRechargeSettings.userId == user.user_id).first()
+    if settings and settings.enabled and db_user.balance < settings.threshold:
+        db_user.balance += settings.rechargeAmount
+        db.add(Notification(
+            notifId=f"notif_{uuid.uuid4().hex[:12]}",
+            userId=user.user_id,
+            type="auto_recharge",
+            message=f"Auto-recharge added Rs.{settings.rechargeAmount:.2f} to your balance.",
+            data=None,
+            isRead=False,
+            createdAt=datetime.now(timezone.utc),
+        ))
+        send_push_to_user(db, user.user_id, "Auto-recharge applied", f"Rs.{settings.rechargeAmount:.2f} added to your balance.")
+        db.commit()
+        return db_user.balance
+
     recent = db.query(Notification).filter(
         Notification.userId == user.user_id,
         Notification.type == "low_balance",
         Notification.createdAt >= datetime.now(timezone.utc) - timedelta(hours=24),
     ).first()
-    if recent:
-        return
+    if not recent:
+        db.add(Notification(
+            notifId=f"notif_{uuid.uuid4().hex[:12]}",
+            userId=user.user_id,
+            type="low_balance",
+            message=f"Your balance is low (Rs.{db_user.balance:.2f}). Add funds to avoid disruption.",
+            data=None,
+            isRead=False,
+            createdAt=datetime.now(timezone.utc),
+        ))
+        send_push_to_user(db, user.user_id, "Low balance warning", f"Your balance is Rs.{db_user.balance:.2f}. Add funds soon.")
+        db.commit()
 
-    db.add(Notification(
-        notifId=f"notif_{uuid.uuid4().hex[:12]}",
-        userId=user.user_id,
-        type="low_balance",
-        message=f"Your balance is low (Rs.{user.balance:.2f}). Add funds to avoid disruption.",
-        data=None,
-        isRead=False,
-        createdAt=datetime.now(timezone.utc),
-    ))
-    send_push_to_user(db, user.user_id, "Low balance warning", f"Your balance is Rs.{user.balance:.2f}. Add funds soon.")
-    db.commit()
+    return db_user.balance
 
 def user_to_schema(user: DBUser) -> dict:
     return {
@@ -710,6 +740,51 @@ async def admin_login(credentials: UserLogin):
         return {"user": {"user_id": user.user_id, "email": user.email, "name": user.name, "role": user.role}, "session_token": session_token}
     finally:
         db.close()
+        
+class AutoRechargeRequest(BaseModel):
+    enabled: bool
+    rechargeAmount: float
+    threshold: float
+
+
+@app.get("/api/user/auto-recharge")
+async def get_auto_recharge_settings(request: Request, authorization: Optional[str] = Header(None)):
+    user = await get_current_user(authorization, request)
+    db = SessionLocal()
+    try:
+        settings = db.query(AutoRechargeSettings).filter(AutoRechargeSettings.userId == user.user_id).first()
+        if not settings:
+            return {"enabled": False, "rechargeAmount": 500.0, "threshold": 100.0}
+        return {"enabled": settings.enabled, "rechargeAmount": settings.rechargeAmount, "threshold": settings.threshold}
+    finally:
+        db.close()
+
+
+@app.post("/api/user/auto-recharge")
+async def save_auto_recharge_settings(req: AutoRechargeRequest, request: Request, authorization: Optional[str] = Header(None)):
+    user = await get_current_user(authorization, request)
+    if req.rechargeAmount <= 0 or req.threshold <= 0:
+        raise HTTPException(status_code=400, detail="Amount and threshold must be positive")
+
+    db = SessionLocal()
+    try:
+        settings = db.query(AutoRechargeSettings).filter(AutoRechargeSettings.userId == user.user_id).first()
+        if settings:
+            settings.enabled = req.enabled
+            settings.rechargeAmount = req.rechargeAmount
+            settings.threshold = req.threshold
+            settings.updatedAt = datetime.now(timezone.utc)
+        else:
+            db.add(AutoRechargeSettings(
+                userId=user.user_id,
+                enabled=req.enabled,
+                rechargeAmount=req.rechargeAmount,
+                threshold=req.threshold,
+            ))
+        db.commit()
+        return {"message": "Auto-recharge settings saved"}
+    finally:
+        db.close()
 
 
 @app.get("/api/user/dashboard")
@@ -720,16 +795,14 @@ async def get_user_dashboard(request: Request, authorization: Optional[str] = He
         latest_reading = db.query(EnergyReading).filter(EnergyReading.userId == user.user_id).order_by(EnergyReading.timestamp.desc()).first()
         latest_bill = db.query(Bill).filter(Bill.userId == user.user_id).order_by(Bill.generatedAt.desc()).first()
         power_on = compute_power_status(db, user.user_id)
-        check_low_balance(db, user)
-
-        
+        current_balance = check_balance_and_recharge(db, user)
 
         return {
             "user": user.dict(),
             "currentReading": reading_to_dict(latest_reading) if latest_reading else {"voltage": 0, "current": 0, "power": 0, "energy": 0},
             "currentBill": bill_to_dict(latest_bill) if latest_bill else {"amount": 0, "status": "paid", "dueDate": None},
             "powerStatus": "ON" if power_on else "OFF",
-            "balance": user.balance,
+            "balance": current_balance,
         }
     finally:
         db.close()

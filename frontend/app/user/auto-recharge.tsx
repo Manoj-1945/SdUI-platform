@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { View, Text, StyleSheet, Switch, TouchableOpacity, TextInput, Alert } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
@@ -10,6 +10,24 @@ export default function AutoRechargeScreen() {
   const [rechargeAmount, setRechargeAmount] = useState('500');
   const [threshold, setThreshold] = useState('100');
   const [loading, setLoading] = useState(false);
+  const [initialLoading, setInitialLoading] = useState(true);
+
+  useEffect(() => {
+    fetchSettings();
+  }, []);
+
+  const fetchSettings = async () => {
+    try {
+      const response = await api.get('/api/user/auto-recharge');
+      setIsEnabled(response.data.enabled);
+      setRechargeAmount(String(response.data.rechargeAmount));
+      setThreshold(String(response.data.threshold));
+    } catch (error) {
+      // Keep the defaults if this fails - not critical enough to block the screen
+    } finally {
+      setInitialLoading(false);
+    }
+  };
 
   const handleSave = async () => {
     setLoading(true);
