@@ -25,7 +25,9 @@ jq>=1.6.0
 typer>=0.9.0
 razorpay==2.0.1
 google-auth>=2.0.0
+apscheduler>=3.10.4
 pywebpush>=2.0.0
 websockets>=12.0
 fpdf2>=2.7.0
-apscheduler
+python-barcode>=0.15.1
+Pillow>=10.0.0
