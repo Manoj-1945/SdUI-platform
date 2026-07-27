@@ -519,6 +519,7 @@ class User(BaseModel):
 
 class IoTData(BaseModel):
     userId: str
+    deviceId: str
     voltage: float
     current: float
     power: float
@@ -1513,6 +1514,11 @@ async def receive_iot_data(iot_data: IoTData):
         user = db.query(DBUser).filter(DBUser.user_id == iot_data.userId).first()
         if not user:
             raise HTTPException(status_code=404, detail="User not found")
+
+        device = db.query(Device).filter(Device.deviceId == iot_data.deviceId, Device.userId == iot_data.userId).first()
+        if not device:
+            raise HTTPException(status_code=403, detail="Device is not registered to this account")
+        device.lastSeen = datetime.now(timezone.utc)
 
         last_reading = db.query(EnergyReading).filter(EnergyReading.userId == iot_data.userId).order_by(EnergyReading.timestamp.desc()).first()
         power_increase = iot_data.power - (last_reading.power if last_reading else 0)
