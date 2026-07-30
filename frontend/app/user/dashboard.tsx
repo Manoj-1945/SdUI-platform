@@ -59,7 +59,14 @@ export default function UserDashboard() {
   const fetchDashboard = async () => {
     try {
       const response = await api.get('/api/user/dashboard');
-      setDashboardData(response.data);
+      let insights = null;
+      try {
+        const insightsRes = await api.get('/api/user/usage-insights');
+        insights = insightsRes.data;
+      } catch (e) {
+        // Non-critical - dashboard still works without the insights card
+      }
+      setDashboardData({ ...response.data, usageInsights: insights });
       setLoadError(false);
     } catch (error: any) {
       Alert.alert('Error', error.response?.data?.detail || 'Failed to load dashboard');

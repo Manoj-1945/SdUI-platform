@@ -328,15 +328,17 @@ def generate_bill_for_user(db, user):
         old_bill.status = "rolled_forward"
 
     total_payable = round(breakdown["currentCharge"] + arrears + interest, 2)
+    fully_covered = total_payable <= 0
 
     now = datetime.now(timezone.utc)
     bill_id = f"bill_{uuid.uuid4().hex[:12]}"
     bill = Bill(
         billId=bill_id,
         userId=user.user_id,
-        amount=total_payable,
-        status="unpaid",
+        amount=max(0.0, total_payable),
+        status="paid" if fully_covered else "unpaid",
         generatedAt=now,
+        paidAt=now if fully_covered else None,
         dueDate=now + timedelta(days=15),
     )
     db.add(bill)
@@ -359,11 +361,20 @@ def generate_bill_for_user(db, user):
             notifId=f"notif_{uuid.uuid4().hex[:12]}",
             userId=user.user_id,
             type="bill_generated",
-            message=f"Your new bill of Rs.{total_payable} has been generated.",
+            message=(
+                "Your bill this period is fully covered - nothing to pay."
+                if fully_covered
+                else f"Your new bill of Rs.{max(0.0, total_payable):.2f} has been generated."
+            ),
             data=None,
         )
     )
-    send_push_to_user(db, user.user_id, "New bill generated", f"Your new bill of Rs.{total_payable} is ready to pay.")
+    send_push_to_user(
+        db,
+        user.user_id,
+        "Bill fully covered" if fully_covered else "New bill generated",
+        "Nothing to pay this period." if fully_covered else f"Your new bill of Rs.{max(0.0, total_payable):.2f} is ready to pay.",
+    )
     return bill
 
 
@@ -1178,6 +1189,18 @@ async def get_notifications(request: Request, authorization: Optional[str] = Hea
         db.close()
 
 
+@app.post("/api/user/notifications/mark-all-as-read")
+async def mark_all_notifications_read(request: Request, authorization: Optional[str] = Header(None)):
+    user = await get_current_user(authorization, request)
+    db = SessionLocal()
+    try:
+        db.query(Notification).filter(Notification.userId == user.user_id, Notification.isRead == False).update({"isRead": True})
+        db.commit()
+        return {"message": "All notifications marked as read"}
+    finally:
+        db.close()
+
+
 @app.get("/api/user/predicted-bill")
 async def get_predicted_bill(request: Request, authorization: Optional[str] = Header(None)):
     user = await get_current_user(authorization, request)
@@ -1507,6 +1530,29 @@ async def download_bill_receipt(bill_id: str, request: Request, authorization: O
         db.close()
 
 
+@app.get("/api/device/power-status")
+async def device_power_status(userId: str, deviceId: str):
+    """Unauthenticated on purpose, matching /api/iot/data's pattern -
+    a physical device can't easily hold a login session. Only requires
+    knowing a real, registered userId+deviceId pair, same trust model as
+    submitting readings. The ESP32 polls this to decide whether to keep
+    its relay/contactor closed (power ON) or open it (power OFF)."""
+    db = SessionLocal()
+    try:
+        user = db.query(DBUser).filter(DBUser.user_id == userId).first()
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+
+        device = db.query(Device).filter(Device.deviceId == deviceId, Device.userId == userId).first()
+        if not device:
+            raise HTTPException(status_code=403, detail="Device is not registered to this account")
+
+        power_on = compute_power_status(db, userId)
+        return {"powerOn": power_on}
+    finally:
+        db.close()
+
+
 @app.post("/api/iot/data")
 async def receive_iot_data(iot_data: IoTData):
     db = SessionLocal()
@@ -1651,6 +1697,7 @@ async def get_usage_insights(request: Request, authorization: Optional[str] = He
         this_month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
         last_month_end = this_month_start - timedelta(seconds=1)
         last_month_start = last_month_end.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        rolling_window_start = now - timedelta(days=30)
 
         this_month_readings = db.query(EnergyReading).filter(
             EnergyReading.userId == user.user_id, EnergyReading.timestamp >= this_month_start
@@ -1660,14 +1707,26 @@ async def get_usage_insights(request: Request, authorization: Optional[str] = He
             EnergyReading.timestamp >= last_month_start,
             EnergyReading.timestamp <= last_month_end,
         ).all()
+        rolling_readings = db.query(EnergyReading).filter(
+            EnergyReading.userId == user.user_id, EnergyReading.timestamp >= rolling_window_start
+        ).all()
 
         this_month_energy = sum(r.energy for r in this_month_readings)
         last_month_energy = sum(r.energy for r in last_month_readings)
+        rolling_energy = sum(r.energy for r in rolling_readings)
 
+        vs_last_month = None
         if last_month_energy > 0:
-            percent_change = round(((this_month_energy - last_month_energy) / last_month_energy) * 100, 1)
-        else:
-            percent_change = None  # no data last month to compare against
+            vs_last_month = round(((this_month_energy - last_month_energy) / last_month_energy) * 100, 1)
+
+        # Compare this month's average daily usage against the trailing
+        # 30-day average daily usage, so a partial month still compares fairly.
+        vs_rolling_avg = None
+        days_elapsed_this_month = max(1, (now - this_month_start).days + 1)
+        rolling_daily_avg = rolling_energy / 30
+        this_month_daily_avg = this_month_energy / days_elapsed_this_month
+        if rolling_daily_avg > 0:
+            vs_rolling_avg = round(((this_month_daily_avg - rolling_daily_avg) / rolling_daily_avg) * 100, 1)
 
         # Rough per-appliance cost breakdown: any reading whose power falls
         # within a calibrated appliance's range counts toward its usage.
@@ -1678,25 +1737,16 @@ async def get_usage_insights(request: Request, authorization: Optional[str] = He
             matching = [r for r in this_month_readings if appliance.minPower <= r.power <= appliance.maxPower]
             appliance_energy = sum(r.energy for r in matching)
             if appliance_energy > 0:
-                breakdown.append({
-                    "applianceId": appliance.applianceId,
-                    "name": appliance.name,
-                    "estimatedEnergy": round(appliance_energy, 3),
-                    "estimatedCost": round(appliance_energy * user.tariffRate, 2),
-                })
-        breakdown.sort(key=lambda item: item["estimatedCost"], reverse=True)
+                breakdown.append({"name": appliance.name, "usage": round(appliance_energy, 3)})
+        breakdown.sort(key=lambda item: item["usage"], reverse=True)
+
+        recharge_settings = db.query(AutoRechargeSettings).filter(AutoRechargeSettings.userId == user.user_id).first()
 
         return {
-            "thisMonth": {
-                "energy": round(this_month_energy, 3),
-                "cost": round(this_month_energy * user.tariffRate, 2),
-            },
-            "lastMonth": {
-                "energy": round(last_month_energy, 3),
-                "cost": round(last_month_energy * user.tariffRate, 2),
-            },
-            "percentChange": percent_change,
-            "applianceBreakdown": breakdown,
+            "vsLastMonth": vs_last_month,
+            "vsRollingAvg": vs_rolling_avg,
+            "hottestAppliance": breakdown[0] if breakdown else None,
+            "isAutoRechargeEnabled": bool(recharge_settings and recharge_settings.enabled),
         }
     finally:
         db.close()
