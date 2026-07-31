@@ -1016,22 +1016,59 @@ async def get_user_dashboard(request: Request, authorization: Optional[str] = He
 
 
 @app.get("/api/user/energy-history")
-async def get_energy_history(period: str, request: Request, authorization: Optional[str] = Header(None)):
+async def get_energy_history(period: str, comparison: str = "none", request: Request = None, authorization: Optional[str] = Header(None)):
     user = await get_current_user(authorization, request)
     db = SessionLocal()
     try:
         now = datetime.now(timezone.utc)
         if period == "daily":
-            start_date = now - timedelta(days=1)
+            period_length = timedelta(days=1)
         elif period == "weekly":
-            start_date = now - timedelta(days=7)
+            period_length = timedelta(days=7)
         elif period == "monthly":
-            start_date = now - timedelta(days=30)
+            period_length = timedelta(days=30)
         else:
-            start_date = now - timedelta(days=7)
+            period_length = timedelta(days=7)
 
+        start_date = now - period_length
         readings = db.query(EnergyReading).filter(EnergyReading.userId == user.user_id, EnergyReading.timestamp >= start_date).order_by(EnergyReading.timestamp.asc()).all()
-        return {"period": period, "readings": [reading_to_dict(item) for item in readings]}
+
+        comparison_readings = []
+        summary = None
+
+        if comparison == "lastMonth":
+            # Same-length window immediately before the current period
+            comp_start = start_date - period_length
+            comparison_readings = db.query(EnergyReading).filter(
+                EnergyReading.userId == user.user_id,
+                EnergyReading.timestamp >= comp_start,
+                EnergyReading.timestamp < start_date,
+            ).order_by(EnergyReading.timestamp.asc()).all()
+        elif comparison == "rollingAvg":
+            # Trailing 30-day baseline, ending where the current period starts
+            comp_start = start_date - timedelta(days=30)
+            comparison_readings = db.query(EnergyReading).filter(
+                EnergyReading.userId == user.user_id,
+                EnergyReading.timestamp >= comp_start,
+                EnergyReading.timestamp < start_date,
+            ).order_by(EnergyReading.timestamp.asc()).all()
+
+        if comparison != "none":
+            current_avg = (sum(r.energy for r in readings) / len(readings)) if readings else 0.0
+            comparison_avg = (sum(r.energy for r in comparison_readings) / len(comparison_readings)) if comparison_readings else 0.0
+            change_percent = ((current_avg - comparison_avg) / comparison_avg * 100) if comparison_avg > 0 else 0.0
+            summary = {
+                "currentAvg": round(current_avg, 3),
+                "comparisonAvg": round(comparison_avg, 3),
+                "changePercent": round(change_percent, 2),
+            }
+
+        return {
+            "period": period,
+            "readings": [reading_to_dict(item) for item in readings],
+            "comparisonReadings": [reading_to_dict(item) for item in comparison_readings],
+            "summary": summary,
+        }
     finally:
         db.close()
 

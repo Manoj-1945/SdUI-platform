@@ -8,10 +8,12 @@ import {
   Alert,
   Switch,
   RefreshControl,
+  ActivityIndicator,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import api from '../../src/utils/api';
+import { colors, fonts, radii, spacing } from '../../src/theme/tokens';
 
 export default function Appliances() {
   const router = useRouter();
@@ -86,20 +88,20 @@ export default function Appliances() {
 
   const getApplianceColor = (name: string) => {
     const lowerName = name.toLowerCase();
-    if (lowerName.includes('fridge')) return '#4A90E2';
-    if (lowerName.includes('ac')) return '#27AE60';
-    if (lowerName.includes('tv')) return '#9B59B6';
-    if (lowerName.includes('light')) return '#FFD700';
-    if (lowerName.includes('fan')) return '#4A90E2';
-    if (lowerName.includes('wash')) return '#3498DB';
-    if (lowerName.includes('heater')) return '#E74C3C';
-    return '#8B9DC3';
+    if (lowerName.includes('fridge')) return colors.current;
+    if (lowerName.includes('ac')) return colors.success;
+    if (lowerName.includes('tv')) return colors.copper;
+    if (lowerName.includes('light')) return colors.copper;
+    if (lowerName.includes('fan')) return colors.current;
+    if (lowerName.includes('wash')) return colors.current;
+    if (lowerName.includes('heater')) return colors.signal;
+    return colors.mist;
   };
 
   if (loading) {
     return (
       <View style={styles.container}>
-        <Text style={styles.loadingText}>Loading...</Text>
+        <ActivityIndicator color={colors.current} style={{ marginTop: 100 }} />
       </View>
     );
   }
@@ -108,23 +110,23 @@ export default function Appliances() {
     <View style={styles.container}>
       <View style={styles.header}>
         <TouchableOpacity onPress={() => router.back()}>
-          <Ionicons name="arrow-back" size={24} color="#FFF" />
+          <Ionicons name="arrow-back" size={24} color={colors.white} />
         </TouchableOpacity>
         <Text style={styles.title}>My Appliances</Text>
         <TouchableOpacity onPress={() => router.push('/user/calibration')}>
-          <Ionicons name="add-circle" size={28} color="#4A90E2" />
+          <Ionicons name="add-circle" size={28} color={colors.current} />
         </TouchableOpacity>
       </View>
 
       <ScrollView
         style={styles.content}
         refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#4A90E2" />
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.current} />
         }
       >
         {appliances.length === 0 ? (
           <View style={styles.emptyState}>
-            <Ionicons name="apps-outline" size={64} color="#8B9DC3" />
+            <Ionicons name="apps-outline" size={64} color={colors.mist} />
             <Text style={styles.emptyText}>No Appliances Yet</Text>
             <Text style={styles.emptySubtext}>
               Calibrate appliances to get notifications when they turn on
@@ -133,14 +135,14 @@ export default function Appliances() {
               style={styles.calibrateButton}
               onPress={() => router.push('/user/calibration')}
             >
-              <Ionicons name="flash" size={20} color="#FFF" />
+              <Ionicons name="flash" size={20} color={colors.void} />
               <Text style={styles.calibrateButtonText}>Start Calibrating</Text>
             </TouchableOpacity>
           </View>
         ) : (
           <>
             <View style={styles.infoCard}>
-              <Ionicons name="notifications" size={24} color="#4A90E2" />
+              <Ionicons name="notifications" size={22} color={colors.current} />
               <Text style={styles.infoText}>
                 Get alerts when your appliances turn on
               </Text>
@@ -155,12 +157,12 @@ export default function Appliances() {
                   <View
                     style={[
                       styles.applianceIcon,
-                      { backgroundColor: getApplianceColor(appliance.name) + '20' },
+                      { backgroundColor: getApplianceColor(appliance.name) + '22' },
                     ]}
                   >
                     <Ionicons
                       name={getApplianceIcon(appliance.name)}
-                      size={32}
+                      size={28}
                       color={getApplianceColor(appliance.name)}
                     />
                   </View>
@@ -174,23 +176,21 @@ export default function Appliances() {
                     </Text>
                   </View>
                   <View style={styles.applianceActions}>
-                    <View style={styles.notificationToggle}>
-                      <Switch
-                        value={appliance.notificationsEnabled}
-                        onValueChange={() =>
-                          handleToggleNotifications(appliance.applianceId)
-                        }
-                        trackColor={{ false: '#8B9DC3', true: '#4A90E2' }}
-                        thumbColor="#FFFFFF"
-                      />
-                    </View>
+                    <Switch
+                      value={appliance.notificationsEnabled}
+                      onValueChange={() =>
+                        handleToggleNotifications(appliance.applianceId)
+                      }
+                      trackColor={{ false: colors.mistDim, true: colors.current }}
+                      thumbColor={colors.white}
+                    />
                     <TouchableOpacity
                       style={styles.deleteButton}
                       onPress={() =>
                         handleDeleteAppliance(appliance.applianceId, appliance.name)
                       }
                     >
-                      <Ionicons name="trash" size={20} color="#E74C3C" />
+                      <Ionicons name="trash" size={18} color={colors.signal} />
                     </TouchableOpacity>
                   </View>
                 </View>
@@ -200,11 +200,11 @@ export default function Appliances() {
             <View style={styles.statsCard}>
               <Text style={styles.statsTitle}>Power Usage</Text>
               <View style={styles.statsRow}>
-                <Text style={styles.statsLabel}>Total Appliances:</Text>
+                <Text style={styles.statsLabel}>Total Appliances</Text>
                 <Text style={styles.statsValue}>{appliances.length}</Text>
               </View>
               <View style={styles.statsRow}>
-                <Text style={styles.statsLabel}>Average Power:</Text>
+                <Text style={styles.statsLabel}>Average Power</Text>
                 <Text style={styles.statsValue}>
                   {(
                     appliances.reduce((sum, a) => sum + a.avgPower, 0) / appliances.length
@@ -213,7 +213,7 @@ export default function Appliances() {
                 </Text>
               </View>
               <View style={styles.statsRow}>
-                <Text style={styles.statsLabel}>Notifications:</Text>
+                <Text style={styles.statsLabel}>Notifications</Text>
                 <Text style={styles.statsValue}>
                   {appliances.filter((a) => a.notificationsEnabled).length} enabled
                 </Text>
@@ -229,158 +229,154 @@ export default function Appliances() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#0A0E27',
+    backgroundColor: colors.void,
   },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    padding: 24,
+    paddingHorizontal: spacing.lg,
     paddingTop: 60,
+    paddingBottom: spacing.md,
   },
   title: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#FFFFFF',
+    fontFamily: fonts.display,
+    fontSize: 18,
+    color: colors.white,
   },
   content: {
     flex: 1,
   },
   infoCard: {
     flexDirection: 'row',
-    backgroundColor: '#4A90E220',
-    borderRadius: 12,
-    padding: 16,
-    margin: 24,
-    marginTop: 0,
-    gap: 12,
+    backgroundColor: colors.current + '18',
+    borderRadius: radii.md,
+    padding: spacing.md,
+    marginHorizontal: spacing.lg,
+    marginBottom: spacing.md,
+    gap: spacing.sm + 4,
     alignItems: 'center',
   },
   infoText: {
     flex: 1,
-    color: '#4A90E2',
-    fontSize: 14,
+    fontFamily: fonts.body,
+    color: colors.current,
+    fontSize: 13,
   },
   section: {
-    padding: 24,
-    paddingTop: 0,
+    paddingHorizontal: spacing.lg,
   },
   sectionTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#FFFFFF',
-    marginBottom: 16,
+    fontFamily: fonts.display,
+    fontSize: 16,
+    color: colors.white,
+    marginBottom: spacing.md,
   },
   applianceCard: {
     flexDirection: 'row',
-    backgroundColor: '#1A1F3A',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 12,
+    backgroundColor: colors.circuit,
+    borderRadius: radii.md,
+    padding: spacing.md,
+    marginBottom: spacing.sm + 4,
     alignItems: 'center',
   },
   applianceIcon: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
+    width: 52,
+    height: 52,
+    borderRadius: radii.full,
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: 12,
+    marginRight: spacing.sm + 4,
   },
   applianceInfo: {
     flex: 1,
   },
   applianceName: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#FFFFFF',
+    fontFamily: fonts.display,
+    fontSize: 15,
+    color: colors.white,
   },
   appliancePower: {
-    fontSize: 14,
-    color: '#4A90E2',
+    fontFamily: fonts.mono,
+    fontSize: 12,
+    color: colors.current,
     marginTop: 4,
   },
   applianceDate: {
-    fontSize: 12,
-    color: '#8B9DC3',
-    marginTop: 4,
+    fontFamily: fonts.body,
+    fontSize: 11,
+    color: colors.mist,
+    marginTop: 2,
   },
   applianceActions: {
-    flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
-  },
-  notificationToggle: {
-    paddingVertical: 4,
+    gap: spacing.sm,
   },
   deleteButton: {
-    padding: 8,
+    padding: 4,
   },
   statsCard: {
-    backgroundColor: '#1A1F3A',
-    borderRadius: 12,
-    padding: 20,
-    margin: 24,
-    marginTop: 0,
+    backgroundColor: colors.circuit,
+    borderRadius: radii.md,
+    padding: spacing.md,
+    marginHorizontal: spacing.lg,
+    marginTop: spacing.sm,
+    marginBottom: spacing.xl,
   },
   statsTitle: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: '#FFFFFF',
-    marginBottom: 16,
+    fontFamily: fonts.display,
+    fontSize: 15,
+    color: colors.white,
+    marginBottom: spacing.md,
   },
   statsRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginBottom: 12,
+    marginBottom: spacing.sm + 4,
   },
   statsLabel: {
-    fontSize: 14,
-    color: '#8B9DC3',
+    fontFamily: fonts.body,
+    fontSize: 13,
+    color: colors.mist,
   },
   statsValue: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#4A90E2',
+    fontFamily: fonts.display,
+    fontSize: 13,
+    color: colors.current,
   },
   emptyState: {
     alignItems: 'center',
     justifyContent: 'center',
-    padding: 48,
+    padding: spacing.xl,
     marginTop: 60,
   },
   emptyText: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#FFFFFF',
-    marginTop: 16,
+    fontFamily: fonts.display,
+    fontSize: 18,
+    color: colors.white,
+    marginTop: spacing.md,
   },
   emptySubtext: {
-    fontSize: 14,
-    color: '#8B9DC3',
+    fontFamily: fonts.body,
+    fontSize: 13,
+    color: colors.mist,
     textAlign: 'center',
-    marginTop: 8,
-    lineHeight: 20,
+    marginTop: spacing.sm,
+    lineHeight: 19,
   },
   calibrateButton: {
     flexDirection: 'row',
-    backgroundColor: '#4A90E2',
-    paddingHorizontal: 24,
-    paddingVertical: 12,
-    borderRadius: 8,
-    marginTop: 24,
-    gap: 8,
+    backgroundColor: colors.current,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.sm + 4,
+    borderRadius: radii.sm,
+    marginTop: spacing.lg,
+    gap: spacing.sm,
     alignItems: 'center',
   },
   calibrateButtonText: {
-    color: '#FFFFFF',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  loadingText: {
-    color: '#FFFFFF',
-    fontSize: 18,
-    textAlign: 'center',
-    marginTop: 100,
+    fontFamily: fonts.display,
+    color: colors.void,
+    fontSize: 15,
   },
 });

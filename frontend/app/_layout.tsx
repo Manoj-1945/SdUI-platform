@@ -45,6 +45,7 @@ export default function RootLayout() {
       <Stack.Screen name="user/calibration" />
       <Stack.Screen name="user/appliances" />
       <Stack.Screen name="user/auto-recharge" />
+      <Stack.Screen name="user/consumer-profile" />
       <Stack.Screen name="admin/dashboard" />
       <Stack.Screen name="admin/user-detail" />
     </Stack>

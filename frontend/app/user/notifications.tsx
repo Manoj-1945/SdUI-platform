@@ -6,10 +6,29 @@ import {
   ScrollView,
   TouchableOpacity,
   Alert,
+  ActivityIndicator,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import api from '../../src/utils/api';
+import { colors, fonts, radii, spacing } from '../../src/theme/tokens';
+
+// Matches the actual notification "type" values the backend creates.
+const ICON_MAP: Record<string, { icon: string; color: string }> = {
+  payment: { icon: 'card', color: colors.success },
+  high_usage: { icon: 'warning', color: colors.signal },
+  power_control: { icon: 'flash', color: colors.signal },
+  power_spike: { icon: 'trending-up', color: colors.signal },
+  bill_due_reminder: { icon: 'time', color: colors.copper },
+  bill_generated: { icon: 'receipt', color: colors.copper },
+  low_balance: { icon: 'wallet', color: colors.copper },
+  auto_recharge: { icon: 'shield-checkmark', color: colors.success },
+  appliance_detected: { icon: 'flash-outline', color: colors.current },
+  appliance_calibrated: { icon: 'checkmark-circle', color: colors.success },
+  device_registered: { icon: 'hardware-chip', color: colors.current },
+  tariff_update: { icon: 'pricetag', color: colors.mist },
+};
+const DEFAULT_ICON = { icon: 'notifications', color: colors.mist };
 
 export default function Notifications() {
   const router = useRouter();
@@ -31,43 +50,7 @@ export default function Notifications() {
     }
   };
 
-  const getIcon = (type: string) => {
-    switch (type) {
-      case 'payment':
-        return 'card';
-      case 'high_usage':
-        return 'warning';
-      case 'power_control':
-        return 'flash';
-      case 'bill_due':
-        return 'time';
-      case 'low_balance':
-        return 'wallet';
-      case 'auto_recharge_failed':
-        return 'alert-circle';
-      default:
-        return 'notifications';
-    }
-  };
-
-  const getIconColor = (type: string) => {
-    switch (type) {
-      case 'payment':
-        return '#27AE60';
-      case 'high_usage':
-        return '#F39C12';
-      case 'power_control':
-        return '#E74C3C';
-      case 'bill_due':
-        return '#4A90E2';
-      case 'low_balance':
-        return '#F39C12';
-      case 'auto_recharge_failed':
-        return '#E74C3C';
-      default:
-        return '#8B9DC3';
-    }
-  };
+  const getIconInfo = (type: string) => ICON_MAP[type] || DEFAULT_ICON;
 
   const markAllAsRead = async () => {
     try {
@@ -82,38 +65,41 @@ export default function Notifications() {
     <View style={styles.container}>
       <View style={styles.header}>
         <TouchableOpacity onPress={() => router.back()}>
-          <Ionicons name="arrow-back" size={24} color="#FFF" />
+          <Ionicons name="arrow-back" size={24} color={colors.white} />
         </TouchableOpacity>
         <Text style={styles.title}>Notifications</Text>
         <TouchableOpacity onPress={markAllAsRead}>
-          <Ionicons name="checkmark-done" size={24} color="#FFF" />
+          <Ionicons name="checkmark-done" size={24} color={colors.white} />
         </TouchableOpacity>
       </View>
 
       <ScrollView style={styles.content}>
         {loading ? (
-          <Text style={styles.loadingText}>Loading...</Text>
+          <ActivityIndicator color={colors.current} style={{ marginTop: 40 }} />
         ) : notifications.length === 0 ? (
           <View style={styles.emptyState}>
-            <Ionicons name="notifications-outline" size={64} color="#8B9DC3" />
+            <Ionicons name="notifications-outline" size={64} color={colors.mist} />
             <Text style={styles.emptyText}>No notifications</Text>
             <Text style={styles.emptySubtext}>You're all caught up!</Text>
           </View>
         ) : (
-          notifications.map((notif, index) => (
-            <View key={index} style={styles.notifCard}>
-              <View style={[styles.iconContainer, { backgroundColor: getIconColor(notif.type) + '20' }]}>
-                <Ionicons name={getIcon(notif.type) as any} size={24} color={getIconColor(notif.type)} />
+          notifications.map((notif, index) => {
+            const { icon, color } = getIconInfo(notif.type);
+            return (
+              <View key={index} style={styles.notifCard}>
+                <View style={[styles.iconContainer, { backgroundColor: color + '22' }]}>
+                  <Ionicons name={icon as any} size={22} color={color} />
+                </View>
+                <View style={styles.notifContent}>
+                  <Text style={styles.notifMessage}>{notif.message}</Text>
+                  <Text style={styles.notifTime}>
+                    {new Date(notif.createdAt).toLocaleString()}
+                  </Text>
+                </View>
+                {!notif.isRead && <View style={styles.unreadDot} />}
               </View>
-              <View style={styles.notifContent}>
-                <Text style={styles.notifMessage}>{notif.message}</Text>
-                <Text style={styles.notifTime}>
-                  {new Date(notif.createdAt).toLocaleString()}
-                </Text>
-              </View>
-              {!notif.isRead && <View style={styles.unreadDot} />}
-            </View>
-          ))
+            );
+          })
         )}
       </ScrollView>
     </View>
@@ -123,78 +109,75 @@ export default function Notifications() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#0A0E27',
+    backgroundColor: colors.void,
   },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    padding: 24,
+    paddingHorizontal: spacing.lg,
     paddingTop: 60,
+    paddingBottom: spacing.md,
   },
   title: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#FFFFFF',
+    fontFamily: fonts.display,
+    fontSize: 18,
+    color: colors.white,
   },
   content: {
     flex: 1,
-    padding: 24,
-    paddingTop: 0,
-  },
-  loadingText: {
-    color: '#8B9DC3',
-    fontSize: 16,
-    textAlign: 'center',
-    marginTop: 40,
+    paddingHorizontal: spacing.lg,
   },
   emptyState: {
     alignItems: 'center',
-    marginTop: 60,
+    marginTop: 80,
   },
   emptyText: {
-    color: '#FFFFFF',
-    fontSize: 18,
-    fontWeight: '600',
-    marginTop: 16,
+    fontFamily: fonts.display,
+    color: colors.white,
+    fontSize: 17,
+    marginTop: spacing.md,
   },
   emptySubtext: {
-    color: '#8B9DC3',
-    fontSize: 14,
-    marginTop: 8,
+    fontFamily: fonts.body,
+    color: colors.mist,
+    fontSize: 13,
+    marginTop: spacing.xs,
   },
   notifCard: {
     flexDirection: 'row',
-    backgroundColor: '#1A1F3A',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 12,
+    backgroundColor: colors.circuit,
+    borderRadius: radii.md,
+    padding: spacing.md,
+    marginBottom: spacing.sm + 4,
     alignItems: 'center',
   },
   iconContainer: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
+    width: 44,
+    height: 44,
+    borderRadius: radii.full,
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: 12,
+    marginRight: spacing.sm + 4,
   },
   notifContent: {
     flex: 1,
   },
   notifMessage: {
-    color: '#FFFFFF',
-    fontSize: 14,
+    fontFamily: fonts.body,
+    color: colors.white,
+    fontSize: 13,
     marginBottom: 4,
   },
   notifTime: {
-    color: '#8B9DC3',
-    fontSize: 12,
+    fontFamily: fonts.mono,
+    color: colors.mist,
+    fontSize: 11,
   },
   unreadDot: {
     width: 8,
     height: 8,
     borderRadius: 4,
-    backgroundColor: '#4A90E2',
+    backgroundColor: colors.current,
   },
 });

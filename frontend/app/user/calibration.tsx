@@ -9,10 +9,12 @@ import {
   Modal,
   TextInput,
   RefreshControl,
+  ActivityIndicator,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import api from '../../src/utils/api';
+import { colors, fonts, radii, spacing } from '../../src/theme/tokens';
 
 export default function Calibration() {
   const router = useRouter();
@@ -27,7 +29,6 @@ export default function Calibration() {
 
   useEffect(() => {
     fetchData();
-    // Refresh every 5 seconds to catch new spikes
     const interval = setInterval(fetchData, 5000);
     return () => clearInterval(interval);
   }, []);
@@ -69,7 +70,6 @@ export default function Calibration() {
 
     setCalibrating(true);
     try {
-      // Calculate power range (±10% tolerance)
       const avgPower = selectedSpike.power;
       const minPower = avgPower * 0.9;
       const maxPower = avgPower * 1.1;
@@ -112,7 +112,7 @@ export default function Calibration() {
   if (loading) {
     return (
       <View style={styles.container}>
-        <Text style={styles.loadingText}>Loading...</Text>
+        <ActivityIndicator color={colors.current} style={{ marginTop: 100 }} />
       </View>
     );
   }
@@ -122,13 +122,13 @@ export default function Calibration() {
       <View style={styles.container}>
         <View style={styles.header}>
           <TouchableOpacity onPress={() => router.back()}>
-            <Ionicons name="arrow-back" size={24} color="#FFF" />
+            <Ionicons name="arrow-back" size={24} color={colors.white} />
           </TouchableOpacity>
           <Text style={styles.title}>Calibrate Appliances</Text>
           <View style={{ width: 24 }} />
         </View>
         <View style={styles.emptyState}>
-          <Ionicons name="hardware-chip-outline" size={64} color="#8B9DC3" />
+          <Ionicons name="hardware-chip-outline" size={64} color={colors.mist} />
           <Text style={styles.emptyText}>No Device Registered</Text>
           <Text style={styles.emptySubtext}>Register an ESP32 device first</Text>
           <TouchableOpacity
@@ -146,37 +146,37 @@ export default function Calibration() {
     <View style={styles.container}>
       <View style={styles.header}>
         <TouchableOpacity onPress={() => router.back()}>
-          <Ionicons name="arrow-back" size={24} color="#FFF" />
+          <Ionicons name="arrow-back" size={24} color={colors.white} />
         </TouchableOpacity>
         <Text style={styles.title}>Calibrate Appliances</Text>
         <TouchableOpacity onPress={onRefresh}>
-          <Ionicons name="refresh" size={24} color="#4A90E2" />
+          <Ionicons name="refresh" size={22} color={colors.current} />
         </TouchableOpacity>
       </View>
 
       <ScrollView
         style={styles.content}
         refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#4A90E2" />
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.current} />
         }
       >
         <View style={styles.infoCard}>
-          <Ionicons name="information-circle" size={24} color="#FFD700" />
+          <Ionicons name="information-circle" size={22} color={colors.copper} />
           <View style={styles.infoTextContainer}>
             <Text style={styles.infoTitle}>How it works</Text>
             <Text style={styles.infoText}>
-              Turn ON an appliance → Power spike detected → Name it → Get alerts when it turns on!
+              Turn ON an appliance, a power spike gets detected, name it, then get alerts when it turns on.
             </Text>
           </View>
         </View>
 
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>
-            ⚡ Detected Power Spikes ({powerSpikes.length})
+            Detected Power Spikes ({powerSpikes.length})
           </Text>
           {powerSpikes.length === 0 ? (
             <View style={styles.waitingCard}>
-              <Ionicons name="time" size={48} color="#4A90E2" />
+              <Ionicons name="time" size={44} color={colors.current} />
               <Text style={styles.waitingText}>Waiting for power spikes...</Text>
               <Text style={styles.waitingSubtext}>
                 Turn ON an appliance to detect it
@@ -195,7 +195,7 @@ export default function Calibration() {
                 onPress={() => handleCalibrateSpike(spike)}
               >
                 <View style={styles.spikeIcon}>
-                  <Ionicons name="flash" size={32} color="#FFD700" />
+                  <Ionicons name="flash" size={28} color={colors.copper} />
                 </View>
                 <View style={styles.spikeInfo}>
                   <Text style={styles.spikePower}>{spike.power.toFixed(0)}W</Text>
@@ -205,7 +205,7 @@ export default function Calibration() {
                   </Text>
                 </View>
                 <View style={styles.calibrateButton}>
-                  <Ionicons name="create" size={20} color="#4A90E2" />
+                  <Ionicons name="create" size={18} color={colors.current} />
                   <Text style={styles.calibrateButtonText}>Name</Text>
                 </View>
               </TouchableOpacity>
@@ -214,10 +214,10 @@ export default function Calibration() {
         </View>
 
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>📱 Registered Devices</Text>
+          <Text style={styles.sectionTitle}>Registered Devices</Text>
           {devices.map((device, index) => (
             <View key={index} style={styles.deviceCard}>
-              <Ionicons name="hardware-chip" size={32} color="#4A90E2" />
+              <Ionicons name="hardware-chip" size={28} color={colors.current} />
               <View style={styles.deviceInfo}>
                 <Text style={styles.deviceName}>{device.deviceName}</Text>
                 <Text style={styles.deviceId}>{device.deviceId}</Text>
@@ -231,7 +231,6 @@ export default function Calibration() {
         </View>
       </ScrollView>
 
-      {/* Calibration Modal */}
       <Modal
         visible={showModal}
         transparent
@@ -248,7 +247,7 @@ export default function Calibration() {
             <TextInput
               style={styles.modalInput}
               placeholder="e.g., Fridge, AC, TV"
-              placeholderTextColor="#8B9DC3"
+              placeholderTextColor={colors.mistDim}
               value={applianceName}
               onChangeText={setApplianceName}
               autoFocus
@@ -281,153 +280,159 @@ export default function Calibration() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#0A0E27',
+    backgroundColor: colors.void,
   },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    padding: 24,
+    paddingHorizontal: spacing.lg,
     paddingTop: 60,
+    paddingBottom: spacing.md,
   },
   title: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#FFFFFF',
+    fontFamily: fonts.display,
+    fontSize: 18,
+    color: colors.white,
   },
   content: {
     flex: 1,
   },
   infoCard: {
     flexDirection: 'row',
-    backgroundColor: '#FFD70020',
-    borderRadius: 12,
-    padding: 16,
-    margin: 24,
-    marginTop: 0,
-    gap: 12,
+    backgroundColor: colors.copper + '18',
+    borderRadius: radii.md,
+    padding: spacing.md,
+    marginHorizontal: spacing.lg,
+    marginBottom: spacing.md,
+    gap: spacing.sm + 4,
   },
   infoTextContainer: {
     flex: 1,
   },
   infoTitle: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: '#FFD700',
+    fontFamily: fonts.display,
+    fontSize: 14,
+    color: colors.copper,
     marginBottom: 4,
   },
   infoText: {
-    fontSize: 14,
-    color: '#FFD700',
-    lineHeight: 20,
+    fontFamily: fonts.body,
+    fontSize: 13,
+    color: colors.copper,
+    lineHeight: 18,
   },
   section: {
-    padding: 24,
-    paddingTop: 0,
+    paddingHorizontal: spacing.lg,
+    marginBottom: spacing.md,
   },
   sectionTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#FFFFFF',
-    marginBottom: 16,
+    fontFamily: fonts.display,
+    fontSize: 16,
+    color: colors.white,
+    marginBottom: spacing.md,
   },
   waitingCard: {
-    backgroundColor: '#1A1F3A',
-    borderRadius: 16,
-    padding: 32,
+    backgroundColor: colors.circuit,
+    borderRadius: radii.lg,
+    padding: spacing.xl,
     alignItems: 'center',
   },
   waitingText: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#FFFFFF',
-    marginTop: 16,
+    fontFamily: fonts.display,
+    fontSize: 16,
+    color: colors.white,
+    marginTop: spacing.md,
   },
   waitingSubtext: {
-    fontSize: 14,
-    color: '#8B9DC3',
-    marginTop: 8,
+    fontFamily: fonts.body,
+    fontSize: 13,
+    color: colors.mist,
+    marginTop: spacing.xs,
   },
   loadingDots: {
     flexDirection: 'row',
-    marginTop: 20,
-    gap: 8,
+    marginTop: spacing.lg,
+    gap: spacing.sm,
   },
   dot: {
     width: 8,
     height: 8,
     borderRadius: 4,
-    backgroundColor: '#4A90E2',
+    backgroundColor: colors.current,
   },
   spikeCard: {
     flexDirection: 'row',
-    backgroundColor: '#1A1F3A',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 12,
+    backgroundColor: colors.circuit,
+    borderRadius: radii.md,
+    padding: spacing.md,
+    marginBottom: spacing.sm + 4,
     alignItems: 'center',
   },
   spikeIcon: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    backgroundColor: '#FFD70020',
+    width: 52,
+    height: 52,
+    borderRadius: radii.full,
+    backgroundColor: colors.copper + '22',
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: 12,
+    marginRight: spacing.sm + 4,
   },
   spikeInfo: {
     flex: 1,
   },
   spikePower: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#FFFFFF',
+    fontFamily: fonts.displayBold,
+    fontSize: 18,
+    color: colors.white,
   },
   spikeIncrease: {
-    fontSize: 14,
-    color: '#FFD700',
+    fontFamily: fonts.mono,
+    fontSize: 12,
+    color: colors.copper,
     marginTop: 2,
   },
   spikeTime: {
-    fontSize: 12,
-    color: '#8B9DC3',
+    fontFamily: fonts.body,
+    fontSize: 11,
+    color: colors.mist,
     marginTop: 4,
   },
   calibrateButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#4A90E220',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 8,
+    backgroundColor: colors.current + '22',
+    paddingHorizontal: spacing.sm + 4,
+    paddingVertical: spacing.sm,
+    borderRadius: radii.sm,
     gap: 4,
   },
   calibrateButtonText: {
-    color: '#4A90E2',
-    fontSize: 14,
-    fontWeight: '600',
+    fontFamily: fonts.display,
+    color: colors.current,
+    fontSize: 13,
   },
   deviceCard: {
     flexDirection: 'row',
-    backgroundColor: '#1A1F3A',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 12,
+    backgroundColor: colors.circuit,
+    borderRadius: radii.md,
+    padding: spacing.md,
+    marginBottom: spacing.sm + 4,
     alignItems: 'center',
   },
   deviceInfo: {
     flex: 1,
-    marginLeft: 12,
+    marginLeft: spacing.sm + 4,
   },
   deviceName: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#FFFFFF',
+    fontFamily: fonts.display,
+    fontSize: 15,
+    color: colors.white,
   },
   deviceId: {
-    fontSize: 12,
-    color: '#8B9DC3',
+    fontFamily: fonts.mono,
+    fontSize: 11,
+    color: colors.mist,
     marginTop: 4,
   },
   deviceStatus: {
@@ -439,107 +444,106 @@ const styles = StyleSheet.create({
     width: 8,
     height: 8,
     borderRadius: 4,
-    backgroundColor: '#27AE60',
+    backgroundColor: colors.success,
   },
   statusText: {
-    fontSize: 12,
-    color: '#27AE60',
-    fontWeight: '600',
+    fontFamily: fonts.mono,
+    fontSize: 11,
+    color: colors.success,
   },
   emptyState: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    padding: 24,
+    padding: spacing.lg,
   },
   emptyText: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#FFFFFF',
-    marginTop: 16,
+    fontFamily: fonts.display,
+    fontSize: 18,
+    color: colors.white,
+    marginTop: spacing.md,
   },
   emptySubtext: {
-    fontSize: 14,
-    color: '#8B9DC3',
-    marginTop: 8,
+    fontFamily: fonts.body,
+    fontSize: 13,
+    color: colors.mist,
+    marginTop: spacing.sm,
   },
   registerButton: {
-    backgroundColor: '#4A90E2',
-    paddingHorizontal: 24,
-    paddingVertical: 12,
-    borderRadius: 8,
-    marginTop: 24,
+    backgroundColor: colors.current,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.sm + 4,
+    borderRadius: radii.sm,
+    marginTop: spacing.lg,
   },
   registerButtonText: {
-    color: '#FFFFFF',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  loadingText: {
-    color: '#FFFFFF',
-    fontSize: 18,
-    textAlign: 'center',
-    marginTop: 100,
+    fontFamily: fonts.display,
+    color: colors.void,
+    fontSize: 15,
   },
   modalOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.8)',
+    backgroundColor: 'rgba(11, 14, 20, 0.85)',
     justifyContent: 'center',
-    padding: 24,
+    padding: spacing.lg,
   },
   modalContent: {
-    backgroundColor: '#1A1F3A',
-    borderRadius: 16,
-    padding: 24,
+    backgroundColor: colors.circuit,
+    borderRadius: radii.lg,
+    padding: spacing.lg,
   },
   modalTitle: {
-    fontSize: 22,
-    fontWeight: 'bold',
-    color: '#FFFFFF',
+    fontFamily: fonts.display,
+    fontSize: 20,
+    color: colors.white,
     textAlign: 'center',
   },
   modalSubtitle: {
-    fontSize: 16,
-    color: '#4A90E2',
+    fontFamily: fonts.mono,
+    fontSize: 14,
+    color: colors.current,
     textAlign: 'center',
-    marginTop: 8,
-    marginBottom: 24,
+    marginTop: spacing.sm,
+    marginBottom: spacing.lg,
   },
   modalInput: {
-    backgroundColor: '#0A0E27',
-    borderRadius: 12,
-    padding: 16,
-    fontSize: 16,
-    color: '#FFFFFF',
-    marginBottom: 24,
+    backgroundColor: colors.void,
+    borderRadius: radii.sm,
+    padding: spacing.md,
+    fontSize: 15,
+    fontFamily: fonts.body,
+    color: colors.white,
+    marginBottom: spacing.lg,
+    borderWidth: 1,
+    borderColor: colors.circuitLight,
   },
   modalButtons: {
     flexDirection: 'row',
-    gap: 12,
+    gap: spacing.sm + 4,
   },
   modalCancelButton: {
     flex: 1,
-    backgroundColor: '#8B9DC320',
-    padding: 16,
-    borderRadius: 12,
+    backgroundColor: colors.circuitLight,
+    padding: spacing.md,
+    borderRadius: radii.sm,
     alignItems: 'center',
   },
   modalCancelText: {
-    color: '#8B9DC3',
-    fontSize: 16,
-    fontWeight: '600',
+    fontFamily: fonts.display,
+    color: colors.mist,
+    fontSize: 15,
   },
   modalSaveButton: {
     flex: 1,
-    backgroundColor: '#4A90E2',
-    padding: 16,
-    borderRadius: 12,
+    backgroundColor: colors.current,
+    padding: spacing.md,
+    borderRadius: radii.sm,
     alignItems: 'center',
   },
   modalSaveText: {
-    color: '#FFFFFF',
-    fontSize: 16,
-    fontWeight: '600',
+    fontFamily: fonts.display,
+    color: colors.void,
+    fontSize: 15,
   },
   disabledButton: {
     opacity: 0.6,

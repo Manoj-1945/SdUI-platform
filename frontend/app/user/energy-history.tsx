@@ -7,11 +7,13 @@ import {
   TouchableOpacity,
   Dimensions,
   Alert,
+  ActivityIndicator,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { LineChart } from 'react-native-chart-kit';
 import api from '../../src/utils/api';
+import { colors, fonts, radii, spacing } from '../../src/theme/tokens';
 
 const screenWidth = Dimensions.get('window').width;
 
@@ -57,28 +59,25 @@ export default function EnergyHistory() {
 
     const labels = readings.slice(-10).map((r, i) => `${i + 1}`);
     const data = readings.slice(-10).map((r) => r.energy || 0);
-    const datasets = [{ data, color: () => '#4A90E2', strokeWidth: 2 }];
+    const datasets = [{ data, color: () => colors.current, strokeWidth: 2 }];
 
     if (comparison !== 'none' && comparisonReadings.length > 0) {
       const comparisonData = comparisonReadings.slice(-10).map((r) => r.energy || 0);
       datasets.push({
         data: comparisonData,
-        color: () => '#E74C3C',
+        color: () => colors.copper,
         strokeWidth: 1,
       });
     }
 
-    return {
-      labels,
-      datasets,
-    };
+    return { labels, datasets };
   };
 
   return (
     <View style={styles.container}>
       <View style={styles.header}>
         <TouchableOpacity onPress={() => router.back()}>
-          <Ionicons name="arrow-back" size={24} color="#FFF" />
+          <Ionicons name="arrow-back" size={24} color={colors.white} />
         </TouchableOpacity>
         <Text style={styles.title}>Energy History</Text>
         <View style={{ width: 24 }} />
@@ -121,10 +120,10 @@ export default function EnergyHistory() {
 
       <ScrollView style={styles.content}>
         {loading ? (
-          <Text style={styles.loadingText}>Loading...</Text>
+          <ActivityIndicator color={colors.current} style={{ marginTop: 40 }} />
         ) : readings.length === 0 ? (
           <View style={styles.emptyState}>
-            <Ionicons name="bar-chart-outline" size={64} color="#8B9DC3" />
+            <Ionicons name="bar-chart-outline" size={64} color={colors.mist} />
             <Text style={styles.emptyText}>No data available</Text>
             <Text style={styles.emptySubtext}>Energy readings will appear here</Text>
           </View>
@@ -146,15 +145,15 @@ export default function EnergyHistory() {
               <View style={styles.statsCard}>
                 <Text style={styles.statsTitle}>Comparison Summary</Text>
                 <View style={styles.statRow}>
-                  <Text style={styles.statLabel}>Current Period Avg:</Text>
+                  <Text style={styles.statLabel}>Current Period Avg</Text>
                   <Text style={styles.statValue}>{summary.currentAvg.toFixed(2)} kWh</Text>
                 </View>
                 <View style={styles.statRow}>
-                  <Text style={styles.statLabel}>Comparison Avg:</Text>
+                  <Text style={styles.statLabel}>Comparison Avg</Text>
                   <Text style={styles.statValue}>{summary.comparisonAvg.toFixed(2)} kWh</Text>
                 </View>
                 <View style={styles.statRow}>
-                  <Text style={styles.statLabel}>Change:</Text>
+                  <Text style={styles.statLabel}>Change</Text>
                   <Text
                     style={[
                       styles.statValue,
@@ -192,172 +191,170 @@ export default function EnergyHistory() {
 }
 
 const chartConfig = {
-  backgroundColor: '#1A1F3A',
-  backgroundGradientFrom: '#1A1F3A',
-  backgroundGradientTo: '#1A1F3A',
+  backgroundColor: colors.circuit,
+  backgroundGradientFrom: colors.circuit,
+  backgroundGradientTo: colors.circuit,
   decimalPlaces: 2,
-  color: (opacity = 1) => `rgba(74, 144, 226, ${opacity})`,
-  labelColor: (opacity = 1) => `rgba(139, 157, 195, ${opacity})`,
-  style: {
-    borderRadius: 16,
-  },
+  color: (opacity = 1) => `rgba(45, 212, 191, ${opacity})`,
+  labelColor: (opacity = 1) => `rgba(122, 136, 166, ${opacity})`,
+  style: { borderRadius: 16 },
   propsForDots: {
     r: '4',
     strokeWidth: '2',
-    stroke: '#4A90E2',
+    stroke: colors.current,
   },
 };
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#0A0E27',
+    backgroundColor: colors.void,
   },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    padding: 24,
+    paddingHorizontal: spacing.lg,
     paddingTop: 60,
+    paddingBottom: spacing.md,
   },
   title: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#FFFFFF',
+    fontFamily: fonts.display,
+    fontSize: 18,
+    color: colors.white,
   },
   selectors: {
-    paddingHorizontal: 24,
-    gap: 8,
+    paddingHorizontal: spacing.lg,
+    gap: spacing.sm,
   },
   periodSelector: {
     flexDirection: 'row',
-    gap: 8,
+    gap: spacing.sm,
   },
   periodButton: {
     flex: 1,
-    backgroundColor: '#1A1F3A',
-    padding: 12,
-    borderRadius: 8,
+    backgroundColor: colors.circuit,
+    padding: spacing.sm + 4,
+    borderRadius: radii.sm,
     alignItems: 'center',
   },
   periodButtonActive: {
-    backgroundColor: '#4A90E2',
+    backgroundColor: colors.current,
   },
   periodText: {
-    color: '#8B9DC3',
-    fontSize: 14,
-    fontWeight: '600',
+    fontFamily: fonts.body,
+    color: colors.mist,
+    fontSize: 12,
   },
   periodTextActive: {
-    color: '#FFFFFF',
+    fontFamily: fonts.display,
+    color: colors.void,
   },
   content: {
     flex: 1,
-    padding: 24,
-    paddingTop: 16,
-  },
-  loadingText: {
-    color: '#8B9DC3',
-    fontSize: 16,
-    textAlign: 'center',
-    marginTop: 40,
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.md,
   },
   emptyState: {
     alignItems: 'center',
     marginTop: 60,
   },
   emptyText: {
-    color: '#FFFFFF',
-    fontSize: 18,
-    fontWeight: '600',
-    marginTop: 16,
+    fontFamily: fonts.display,
+    color: colors.white,
+    fontSize: 17,
+    marginTop: spacing.md,
   },
   emptySubtext: {
-    color: '#8B9DC3',
-    fontSize: 14,
-    marginTop: 8,
+    fontFamily: fonts.body,
+    color: colors.mist,
+    fontSize: 13,
+    marginTop: spacing.xs,
   },
   chartCard: {
-    backgroundColor: '#1A1F3A',
-    borderRadius: 16,
-    padding: 16,
-    marginBottom: 24,
+    backgroundColor: colors.circuit,
+    borderRadius: radii.md,
+    padding: spacing.md,
+    marginBottom: spacing.lg,
   },
   chartTitle: {
-    color: '#FFFFFF',
-    fontSize: 16,
-    fontWeight: '600',
-    marginBottom: 16,
+    fontFamily: fonts.display,
+    color: colors.white,
+    fontSize: 15,
+    marginBottom: spacing.md,
   },
   chart: {
-    borderRadius: 16,
+    borderRadius: radii.md,
   },
   statsCard: {
-    backgroundColor: '#1A1F3A',
-    borderRadius: 16,
-    padding: 20,
-    marginBottom: 24,
+    backgroundColor: colors.circuit,
+    borderRadius: radii.md,
+    padding: spacing.md,
+    marginBottom: spacing.lg,
   },
   statsTitle: {
-    color: '#FFFFFF',
-    fontSize: 16,
-    fontWeight: '600',
-    marginBottom: 16,
+    fontFamily: fonts.display,
+    color: colors.white,
+    fontSize: 15,
+    marginBottom: spacing.md,
   },
   statRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginBottom: 12,
+    marginBottom: spacing.sm + 4,
   },
   statLabel: {
-    color: '#8B9DC3',
-    fontSize: 14,
+    fontFamily: fonts.body,
+    color: colors.mist,
+    fontSize: 13,
   },
   statValue: {
-    color: '#4A90E2',
-    fontSize: 14,
-    fontWeight: '600',
+    fontFamily: fonts.display,
+    color: colors.current,
+    fontSize: 13,
   },
   positiveChange: {
-    color: '#E74C3C',
+    color: colors.signal,
   },
   negativeChange: {
-    color: '#27AE60',
+    color: colors.success,
   },
   readingsList: {
-    marginBottom: 24,
+    marginBottom: spacing.lg,
   },
   listTitle: {
-    color: '#FFFFFF',
-    fontSize: 16,
-    fontWeight: '600',
-    marginBottom: 16,
+    fontFamily: fonts.display,
+    color: colors.white,
+    fontSize: 15,
+    marginBottom: spacing.md,
   },
   readingItem: {
-    backgroundColor: '#1A1F3A',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 12,
+    backgroundColor: colors.circuit,
+    borderRadius: radii.sm,
+    padding: spacing.md,
+    marginBottom: spacing.sm + 4,
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
   },
   readingEnergy: {
-    color: '#FFFFFF',
-    fontSize: 16,
-    fontWeight: '600',
+    fontFamily: fonts.displayBold,
+    color: colors.white,
+    fontSize: 15,
   },
   readingTime: {
-    color: '#8B9DC3',
-    fontSize: 12,
+    fontFamily: fonts.mono,
+    color: colors.mist,
+    fontSize: 11,
     marginTop: 4,
   },
   readingDetails: {
     alignItems: 'flex-end',
   },
   readingDetail: {
-    color: '#4A90E2',
-    fontSize: 14,
-    marginTop: 4,
+    fontFamily: fonts.mono,
+    color: colors.current,
+    fontSize: 12,
+    marginTop: 2,
   },
 });

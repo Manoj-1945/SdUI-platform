@@ -6,10 +6,12 @@ import {
   ScrollView,
   TouchableOpacity,
   Alert,
+  ActivityIndicator,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import api from '../../src/utils/api';
+import { colors, fonts, radii, spacing } from '../../src/theme/tokens';
 
 export default function PredictedBill() {
   const router = useRouter();
@@ -35,7 +37,7 @@ export default function PredictedBill() {
     <View style={styles.container}>
       <View style={styles.header}>
         <TouchableOpacity onPress={() => router.back()}>
-          <Ionicons name="arrow-back" size={24} color="#FFF" />
+          <Ionicons name="arrow-back" size={24} color={colors.white} />
         </TouchableOpacity>
         <Text style={styles.title}>AI Prediction</Text>
         <View style={{ width: 24 }} />
@@ -43,22 +45,20 @@ export default function PredictedBill() {
 
       <ScrollView style={styles.content}>
         {loading ? (
-          <Text style={styles.loadingText}>Loading...</Text>
+          <ActivityIndicator color={colors.current} style={{ marginTop: 40 }} />
         ) : (
           <>
             <View style={styles.aiCard}>
-              <View style={styles.aiHeader}>
-                <Ionicons name="bulb" size={48} color="#FFD700" />
-                <Text style={styles.aiTitle}>Smart Bill Prediction</Text>
-              </View>
-              <Text style={styles.aiSubtitle}>AI-powered forecast based on your usage</Text>
+              <Ionicons name="bulb" size={44} color={colors.copper} />
+              <Text style={styles.aiTitle}>Smart Bill Prediction</Text>
+              <Text style={styles.aiSubtitle}>Forecast based on your usage pattern</Text>
             </View>
 
             <View style={styles.predictionCard}>
-              <Text style={styles.predictionLabel}>Predicted Monthly Bill</Text>
+              <Text style={styles.predictionLabel}>PREDICTED MONTHLY BILL</Text>
               <Text style={styles.predictionAmount}>₹{prediction?.predictedAmount?.toFixed(2) || '0.00'}</Text>
               <View style={styles.confidenceBadge}>
-                <Ionicons name="stats-chart" size={16} color="#4A90E2" />
+                <Ionicons name="stats-chart" size={14} color={colors.current} />
                 <Text style={styles.confidenceText}>
                   Confidence: {prediction?.confidence || 'N/A'}
                 </Text>
@@ -68,33 +68,28 @@ export default function PredictedBill() {
 
             <View style={styles.infoCard}>
               <View style={styles.infoRow}>
-                <Ionicons name="information-circle" size={20} color="#4A90E2" />
+                <Ionicons name="information-circle" size={18} color={colors.current} />
                 <Text style={styles.infoText}>How it works</Text>
               </View>
               <Text style={styles.infoDescription}>
-                Our AI analyzes your recent energy consumption patterns to predict your upcoming monthly bill. 
-                This helps you plan your budget and manage energy usage efficiently.
+                This looks at your recent energy consumption to estimate your upcoming monthly
+                bill, so you can plan ahead and manage usage more efficiently.
               </Text>
             </View>
 
             <View style={styles.tipsCard}>
-              <Text style={styles.tipsTitle}>💡 Energy Saving Tips</Text>
-              <View style={styles.tip}>
-                <Ionicons name="checkmark-circle" size={16} color="#27AE60" />
-                <Text style={styles.tipText}>Use appliances during off-peak hours</Text>
-              </View>
-              <View style={styles.tip}>
-                <Ionicons name="checkmark-circle" size={16} color="#27AE60" />
-                <Text style={styles.tipText}>Switch to LED bulbs to save energy</Text>
-              </View>
-              <View style={styles.tip}>
-                <Ionicons name="checkmark-circle" size={16} color="#27AE60" />
-                <Text style={styles.tipText}>Unplug devices when not in use</Text>
-              </View>
-              <View style={styles.tip}>
-                <Ionicons name="checkmark-circle" size={16} color="#27AE60" />
-                <Text style={styles.tipText}>Regular maintenance of AC and appliances</Text>
-              </View>
+              <Text style={styles.tipsTitle}>Energy Saving Tips</Text>
+              {[
+                'Use appliances during off-peak hours',
+                'Switch to LED bulbs to save energy',
+                'Unplug devices when not in use',
+                'Regular maintenance of AC and appliances',
+              ].map((tip, i) => (
+                <View key={i} style={styles.tip}>
+                  <Ionicons name="checkmark-circle" size={16} color={colors.success} />
+                  <Text style={styles.tipText}>{tip}</Text>
+                </View>
+              ))}
             </View>
           </>
         )}
@@ -106,135 +101,132 @@ export default function PredictedBill() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#0A0E27',
+    backgroundColor: colors.void,
   },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    padding: 24,
+    paddingHorizontal: spacing.lg,
     paddingTop: 60,
+    paddingBottom: spacing.md,
   },
   title: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#FFFFFF',
+    fontFamily: fonts.display,
+    fontSize: 18,
+    color: colors.white,
   },
   content: {
     flex: 1,
-    padding: 24,
-    paddingTop: 0,
-  },
-  loadingText: {
-    color: '#8B9DC3',
-    fontSize: 16,
-    textAlign: 'center',
-    marginTop: 40,
+    paddingHorizontal: spacing.lg,
   },
   aiCard: {
-    backgroundColor: '#1A1F3A',
-    borderRadius: 16,
-    padding: 24,
+    backgroundColor: colors.circuit,
+    borderRadius: radii.lg,
+    padding: spacing.lg,
     alignItems: 'center',
-    marginBottom: 24,
-  },
-  aiHeader: {
-    alignItems: 'center',
-    marginBottom: 8,
+    marginBottom: spacing.lg,
   },
   aiTitle: {
-    color: '#FFFFFF',
-    fontSize: 22,
-    fontWeight: 'bold',
-    marginTop: 12,
+    fontFamily: fonts.display,
+    color: colors.white,
+    fontSize: 19,
+    marginTop: spacing.sm + 4,
   },
   aiSubtitle: {
-    color: '#8B9DC3',
-    fontSize: 14,
+    fontFamily: fonts.body,
+    color: colors.mist,
+    fontSize: 13,
     textAlign: 'center',
+    marginTop: 4,
   },
   predictionCard: {
-    backgroundColor: '#1A1F3A',
-    borderRadius: 16,
-    padding: 24,
+    backgroundColor: colors.circuit,
+    borderRadius: radii.lg,
+    padding: spacing.lg,
     alignItems: 'center',
-    marginBottom: 24,
-    borderWidth: 2,
-    borderColor: '#4A90E2',
+    marginBottom: spacing.lg,
+    borderWidth: 1,
+    borderColor: colors.current + '55',
   },
   predictionLabel: {
-    color: '#8B9DC3',
-    fontSize: 14,
-    marginBottom: 8,
+    fontFamily: fonts.mono,
+    color: colors.mist,
+    fontSize: 11,
+    letterSpacing: 1.5,
+    marginBottom: spacing.sm,
   },
   predictionAmount: {
-    color: '#4A90E2',
-    fontSize: 48,
-    fontWeight: 'bold',
-    marginBottom: 16,
+    fontFamily: fonts.displayBold,
+    color: colors.current,
+    fontSize: 44,
+    marginBottom: spacing.md,
   },
   confidenceBadge: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#4A90E220',
-    paddingHorizontal: 12,
+    backgroundColor: colors.current + '22',
+    paddingHorizontal: spacing.sm + 4,
     paddingVertical: 6,
-    borderRadius: 6,
-    marginBottom: 8,
+    borderRadius: radii.sm,
+    marginBottom: spacing.sm,
     gap: 6,
   },
   confidenceText: {
-    color: '#4A90E2',
+    fontFamily: fonts.display,
+    color: colors.current,
     fontSize: 12,
-    fontWeight: '600',
   },
   basedOn: {
-    color: '#8B9DC3',
+    fontFamily: fonts.body,
+    color: colors.mist,
     fontSize: 12,
   },
   infoCard: {
-    backgroundColor: '#1A1F3A',
-    borderRadius: 16,
-    padding: 20,
-    marginBottom: 24,
+    backgroundColor: colors.circuit,
+    borderRadius: radii.md,
+    padding: spacing.md,
+    marginBottom: spacing.lg,
   },
   infoRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 12,
-    gap: 8,
+    marginBottom: spacing.sm + 4,
+    gap: spacing.sm,
   },
   infoText: {
-    color: '#FFFFFF',
-    fontSize: 16,
-    fontWeight: '600',
+    fontFamily: fonts.display,
+    color: colors.white,
+    fontSize: 15,
   },
   infoDescription: {
-    color: '#8B9DC3',
-    fontSize: 14,
-    lineHeight: 20,
+    fontFamily: fonts.body,
+    color: colors.mist,
+    fontSize: 13,
+    lineHeight: 19,
   },
   tipsCard: {
-    backgroundColor: '#1A1F3A',
-    borderRadius: 16,
-    padding: 20,
-    marginBottom: 24,
+    backgroundColor: colors.circuit,
+    borderRadius: radii.md,
+    padding: spacing.md,
+    marginBottom: spacing.lg,
   },
   tipsTitle: {
-    color: '#FFFFFF',
-    fontSize: 18,
-    fontWeight: 'bold',
-    marginBottom: 16,
+    fontFamily: fonts.display,
+    color: colors.white,
+    fontSize: 16,
+    marginBottom: spacing.md,
   },
   tip: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 12,
-    gap: 8,
+    marginBottom: spacing.sm + 4,
+    gap: spacing.sm,
   },
   tipText: {
-    color: '#8B9DC3',
-    fontSize: 14,
+    fontFamily: fonts.body,
+    color: colors.mist,
+    fontSize: 13,
     flex: 1,
   },
 });

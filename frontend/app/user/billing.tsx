@@ -7,10 +7,12 @@ import {
   TouchableOpacity,
   Alert,
   Platform,
+  ActivityIndicator,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import api from '../../src/utils/api';
+import { colors, fonts, radii, spacing } from '../../src/theme/tokens';
 
 export default function Billing() {
   const router = useRouter();
@@ -92,7 +94,7 @@ export default function Billing() {
             );
           }
         },
-        theme: { color: '#4A90E2' },
+        theme: { color: colors.copper },
       };
 
       const rzp = new (window as any).Razorpay(options);
@@ -105,216 +107,273 @@ export default function Billing() {
     }
   };
 
+  // Fixed: previously called a wrong /pdf endpoint and referenced an
+  // unimported useAuthStore (would have crashed on tap). Uses the correct
+  // /receipt endpoint and the existing `api` instance, which already
+  // attaches the auth header automatically via its interceptor.
+  const handleDownloadReceipt = async (bill: any) => {
+    if (Platform.OS !== 'web') {
+      Alert.alert('Not supported yet', 'Receipt download is currently only available on the web app.');
+      return;
+    }
+    try {
+      const response = await api.get(`/api/user/bill/${bill.billId}/receipt`, { responseType: 'blob' });
+      const blob = new Blob([response.data], { type: 'application/pdf' });
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `receipt_${bill.billId}.pdf`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+    } catch (error: any) {
+      Alert.alert('Error', 'Could not download receipt');
+    }
+  };
 
-    const handleDownloadPdf = async (bill: any) => {
-      if (Platform.OS !== 'web') {
-        Alert.alert('Not supported yet', 'PDF download is currently only available on the web app.');
-        return;
-      }
-      try {
-        const token = useAuthStore.getState().sessionToken;
-        const response = await fetch(
-          `${api.defaults.baseURL}/api/user/bill/${bill.billId}/pdf`,
-          {
-            headers: {
-              Authorization: `Bearer ${token}`,
-            },
-          }
-        );
-
-        if (!response.ok) {
-          throw new Error('Failed to download PDF');
-        }
-
-        const blob = await response.blob();
-        const url = window.URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `bill-${bill.billId}.pdf`;
-        document.body.appendChild(a);
-        a.click();
-        window.URL.revokeObjectURL(url);
-        a.remove();
-      } catch (error) {
-        Alert.alert('Error', 'Could not download the bill. Please try again.');
-      }
-    };
-
+  if (loading) {
     return (
       <View style={styles.container}>
-        <View style={styles.header}>
-          <TouchableOpacity onPress={() => router.back()}>
-            <Ionicons name="arrow-back" size={24} color="#FFF" />
-          </TouchableOpacity>
-          <Text style={styles.title}>Bills & Payments</Text>
-          <View style={{ width: 24 }} />
-        </View>
-
-        <ScrollView style={styles.content}>
-          {loading ? (
-            <Text style={styles.loadingText}>Loading...</Text>
-          ) : bills.length === 0 ? (
-            <View style={styles.emptyState}>
-              <Ionicons name="receipt-outline" size={64} color="#8B9DC3" />
-              <Text style={styles.emptyText}>No bills yet</Text>
-              <Text style={styles.emptySubtext}>Your bills will appear here</Text>
-            </View>
-          ) : (
-            bills.map((bill, index) => (
-              <View key={index} style={styles.billCard}>
-                <View style={styles.billHeader}>
-                  <View>
-                    <Text style={styles.billMonth}>{bill.billMonth || 'Current Bill'}</Text>
-                    <Text style={styles.billDate}>
-                      Generated: {new Date(bill.generatedAt).toLocaleDateString()}
-                    </Text>
-                  </View>
-                  <View style={[
-                    styles.statusBadge,
-                    bill.status === 'paid' ? styles.statusPaid : styles.statusUnpaid,
-                  ]}>
-                    <Text style={styles.statusText}>{bill.status.toUpperCase()}</Text>
-                  </View>
-                </View>
-
-                <View style={styles.billDetails}>
-                  <View style={styles.detailRow}>
-                    <Text style={styles.detailLabel}>Units Consumed:</Text>
-                    <Text style={styles.detailValue}>{bill.unitsConsumed?.toFixed(2) || '0.00'} kWh</Text>
-                  </View>
-                  <View style={styles.detailRow}>
-                    <Text style={styles.detailLabel}>Amount:</Text>
-                    <Text style={styles.amountValue}>₹{bill.amount.toFixed(2)}</Text>
-                  </View>
-                  {bill.dueDate && (
-                    <View style={styles.detailRow}>
-                      <Text style={styles.detailLabel}>Due Date:</Text>
-                      <Text style={styles.detailValue}>
-                        {new Date(bill.dueDate).toLocaleDateString()}
-                      </Text>
-                    </View>
-                  )}
-                </View>
-
-                {bill.status === 'unpaid' && (
-                  <TouchableOpacity
-                    style={styles.payButton}
-                    onPress={() => handlePayBill(bill)}
-                  >
-                    <Ionicons name="card" size={20} color="#FFF" />
-                    <Text style={styles.payButtonText}>Pay Now</Text>
-                  </TouchableOpacity>
-                )}
-
-                {bill.status === 'paid' && (
-                  <View style={styles.actionsRow}>
-                    <View style={styles.paidInfo}>
-                      <Ionicons name="checkmark-circle" size={20} color="#27AE60" />
-                      <Text style={styles.paidText}>
-                        Paid on {new Date(bill.paidAt).toLocaleDateString()}
-                      </Text>
-                    </View>
-                    <TouchableOpacity
-                      style={styles.downloadButton}
-                      onPress={() => handleDownloadPdf(bill)}
-                    >
-                      <Ionicons name="download" size={20} color="#FFF" />
-                      <Text style={styles.downloadButtonText}>Download PDF</Text>
-                    </TouchableOpacity>
-                  </View>
-                )}
-              </View>
-            ))
-          )}
-        </ScrollView>
+        <ActivityIndicator color={colors.current} style={{ marginTop: 100 }} />
       </View>
     );
   }
 
-  const styles = StyleSheet.create({
-    container: {
-      flex: 1,
-      backgroundColor: '#0A0E27',
-    },
-    header: {
-      flexDirection: 'row',
-      justifyContent: 'space-between',
-      alignItems: 'center',
-      padding: 24,
-      paddingTop: 60,
-    },
-    title: {
-      fontSize: 20,
-      fontWeight: 'bold',
-      color: '#FFFFFF',
-    },
-    content: {
-      flex: 1,
-      padding: 24,
-      paddingTop: 0,
-    },
-    loadingText: {
-      color: '#8B9DC3',
-      fontSize: 16,
-      textAlign: 'center',
-      marginTop: 40,
-    },
-    emptyState: {
-      alignItems: 'center',
-      marginTop: 60,
-    },
-    emptyText: {
-      color: '#FFFFFF',
-      fontSize: 18,
-      fontWeight: '600',
-      marginTop: 16,
-    },
-    emptySubtext: {
-      color: '#8B9DC3',
-      fontSize: 14,
-      marginTop: 8,
-    },
-    billCard: {
-    backgroundColor: '#1A1F3A',
-    borderRadius: 16,
-    padding: 20,
-    marginBottom: 16,
+  return (
+    <View style={styles.container}>
+      <View style={styles.header}>
+        <TouchableOpacity onPress={() => router.back()}>
+          <Ionicons name="arrow-back" size={24} color={colors.white} />
+        </TouchableOpacity>
+        <Text style={styles.title}>Bills & Payments</Text>
+        <TouchableOpacity onPress={() => router.push('/user/consumer-profile')}>
+          <Ionicons name="person-circle-outline" size={24} color={colors.white} />
+        </TouchableOpacity>
+      </View>
+
+      <ScrollView style={styles.content}>
+        {bills.length === 0 ? (
+          <View style={styles.emptyState}>
+            <Ionicons name="receipt-outline" size={64} color={colors.mist} />
+            <Text style={styles.emptyText}>No bills yet</Text>
+            <Text style={styles.emptySubtext}>Your bills will appear here</Text>
+          </View>
+        ) : (
+          bills.map((bill, index) => (
+            <View key={index} style={styles.billCard}>
+              <View style={styles.billHeader}>
+                <View>
+                  <Text style={styles.billMonth}>{bill.billMonth || 'Current Bill'}</Text>
+                  <Text style={styles.billDate}>
+                    Generated: {new Date(bill.generatedAt).toLocaleDateString()}
+                  </Text>
+                </View>
+                <View style={[
+                  styles.statusBadge,
+                  bill.status === 'paid' ? styles.statusPaid : styles.statusUnpaid,
+                ]}>
+                  <Text style={styles.statusText}>{bill.status.toUpperCase()}</Text>
+                </View>
+              </View>
+
+              <View style={styles.billDetails}>
+                <View style={styles.detailRow}>
+                  <Text style={styles.detailLabel}>Units Consumed</Text>
+                  <Text style={styles.detailValue}>{bill.unitsConsumed?.toFixed(2) || '0.00'} kWh</Text>
+                </View>
+                <View style={styles.detailRow}>
+                  <Text style={styles.detailLabel}>Amount</Text>
+                  <Text style={styles.amountValue}>₹{bill.amount.toFixed(2)}</Text>
+                </View>
+                {bill.dueDate && (
+                  <View style={styles.detailRow}>
+                    <Text style={styles.detailLabel}>Due Date</Text>
+                    <Text style={styles.detailValue}>
+                      {new Date(bill.dueDate).toLocaleDateString()}
+                    </Text>
+                  </View>
+                )}
+              </View>
+
+              {bill.status === 'unpaid' && (
+                <TouchableOpacity
+                  style={styles.payButton}
+                  onPress={() => handlePayBill(bill)}
+                >
+                  <Ionicons name="card" size={20} color={colors.void} />
+                  <Text style={styles.payButtonText}>Pay Now</Text>
+                </TouchableOpacity>
+              )}
+
+              {bill.status === 'paid' && (
+                <View style={styles.actionsRow}>
+                  <View style={styles.paidInfo}>
+                    <Ionicons name="checkmark-circle" size={20} color={colors.success} />
+                    <Text style={styles.paidText}>
+                      Paid on {bill.paidAt ? new Date(bill.paidAt).toLocaleDateString() : '-'}
+                    </Text>
+                  </View>
+                  <TouchableOpacity
+                    style={styles.downloadButton}
+                    onPress={() => handleDownloadReceipt(bill)}
+                  >
+                    <Ionicons name="download" size={18} color={colors.void} />
+                    <Text style={styles.downloadButtonText}>Receipt</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+            </View>
+          ))
+        )}
+      </ScrollView>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: colors.void,
   },
-    payButtonText: {
-      color: '#FFFFFF',
-      fontSize: 16,
-      fontWeight: '600',
-    },
-    paidInfo: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'center',
-      paddingVertical: 12,
-      gap: 8,
-    },
-    paidText: {
-      color: '#27AE60',
-      fontSize: 14,
-      fontWeight: '600',
-    },
-    actionsRow: {
-      flexDirection: 'row',
-      justifyContent: 'space-between',
-      alignItems: 'center',
-      marginTop: 8,
-    },
-    downloadButton: {
-      backgroundColor: '#005A9C',
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'center',
-      padding: 12,
-      borderRadius: 10,
-      gap: 8,
-    },
-    downloadButtonText: {
-      color: '#FFFFFF',
-      fontSize: 14,
-      fontWeight: '600',
-    },
-  });
+  header: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: spacing.lg,
+    paddingTop: 60,
+    paddingBottom: spacing.md,
+  },
+  title: {
+    fontFamily: fonts.display,
+    fontSize: 18,
+    color: colors.white,
+  },
+  content: {
+    flex: 1,
+    paddingHorizontal: spacing.lg,
+  },
+  emptyState: {
+    alignItems: 'center',
+    marginTop: 80,
+  },
+  emptyText: {
+    fontFamily: fonts.display,
+    color: colors.white,
+    fontSize: 17,
+    marginTop: spacing.md,
+  },
+  emptySubtext: {
+    fontFamily: fonts.body,
+    color: colors.mist,
+    fontSize: 13,
+    marginTop: spacing.xs,
+  },
+  billCard: {
+    backgroundColor: colors.circuit,
+    borderRadius: radii.md,
+    padding: spacing.md,
+    marginBottom: spacing.md,
+  },
+  billHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginBottom: spacing.md,
+  },
+  billMonth: {
+    fontFamily: fonts.display,
+    color: colors.white,
+    fontSize: 16,
+  },
+  billDate: {
+    fontFamily: fonts.mono,
+    color: colors.mist,
+    fontSize: 11,
+    marginTop: 4,
+  },
+  statusBadge: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: radii.sm,
+  },
+  statusPaid: {
+    backgroundColor: colors.success,
+  },
+  statusUnpaid: {
+    backgroundColor: colors.signal,
+  },
+  statusText: {
+    fontFamily: fonts.mono,
+    color: colors.void,
+    fontSize: 10,
+    letterSpacing: 0.5,
+  },
+  billDetails: {
+    marginBottom: spacing.md,
+  },
+  detailRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 6,
+  },
+  detailLabel: {
+    fontFamily: fonts.body,
+    color: colors.mist,
+    fontSize: 13,
+  },
+  detailValue: {
+    fontFamily: fonts.body,
+    color: colors.white,
+    fontSize: 13,
+  },
+  amountValue: {
+    fontFamily: fonts.displayBold,
+    color: colors.copper,
+    fontSize: 16,
+  },
+  payButton: {
+    flexDirection: 'row',
+    backgroundColor: colors.current,
+    borderRadius: radii.sm,
+    padding: spacing.sm + 4,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  payButtonText: {
+    fontFamily: fonts.display,
+    color: colors.void,
+    fontSize: 15,
+  },
+  actionsRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  paidInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  paidText: {
+    fontFamily: fonts.body,
+    color: colors.success,
+    fontSize: 12,
+  },
+  downloadButton: {
+    flexDirection: 'row',
+    backgroundColor: colors.copper,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: radii.sm,
+    gap: 6,
+  },
+  downloadButtonText: {
+    fontFamily: fonts.display,
+    color: colors.void,
+    fontSize: 12,
+  },
+});
