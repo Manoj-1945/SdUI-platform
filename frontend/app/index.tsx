@@ -4,6 +4,7 @@ import { useRouter } from 'expo-router';
 import { useAuthStore } from '../src/store/authStore';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
+import { colors, fonts, radii, spacing } from '../src/theme/tokens';
 
 export default function Index() {
   const router = useRouter();
@@ -36,7 +37,7 @@ export default function Index() {
     <View style={styles.container}>
       {/* Header */}
       <View style={styles.header}>
-        <Ionicons name="flash" size={60} color="#FFD700" />
+        <Ionicons name="flash" size={60} color={colors.copper} />
         <Text style={styles.title}>Smart Energy Monitor</Text>
         <Text style={styles.subtitle}>IoT-Based Billing System</Text>
       </View>
@@ -44,15 +45,15 @@ export default function Index() {
       {/* Features */}
       <View style={styles.features}>
         <View style={styles.featureItem}>
-          <Ionicons name="analytics" size={32} color="#4A90E2" />
+          <Ionicons name="analytics" size={32} color={colors.current} />
           <Text style={styles.featureText}>Real-time Monitoring</Text>
         </View>
         <View style={styles.featureItem}>
-          <Ionicons name="card" size={32} color="#4A90E2" />
+          <Ionicons name="card" size={32} color={colors.current} />
           <Text style={styles.featureText}>Auto Billing</Text>
         </View>
         <View style={styles.featureItem}>
-          <Ionicons name="notifications" size={32} color="#4A90E2" />
+          <Ionicons name="notifications" size={32} color={colors.current} />
           <Text style={styles.featureText}>Smart Alerts</Text>
         </View>
       </View>
@@ -63,16 +64,16 @@ export default function Index() {
           style={styles.userButton}
           onPress={() => router.push('/auth/login')}
         >
-          <Ionicons name="person" size={24} color="#FFF" />
-          <Text style={styles.buttonText}>User Login</Text>
+          <Ionicons name="person" size={24} color={colors.white} />
+          <Text style={styles.userButtonText}>User Login</Text>
         </TouchableOpacity>
 
         <TouchableOpacity
           style={styles.adminButton}
           onPress={() => router.push('/auth/admin-login')}
         >
-          <Ionicons name="shield" size={24} color="#FFF" />
-          <Text style={styles.buttonText}>Admin Login</Text>
+          <Ionicons name="shield" size={24} color={colors.white} />
+          <Text style={styles.adminButtonText}>Admin Login</Text>
         </TouchableOpacity>
       </View>
 
@@ -86,75 +87,87 @@ export default function Index() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#0A0E27',
-    padding: 24,
+    backgroundColor: colors.void,
+    padding: spacing.lg,
     justifyContent: 'center',
   },
   header: {
     alignItems: 'center',
-    marginBottom: 48,
+    marginBottom: spacing.xl + spacing.lg,
   },
   title: {
-    fontSize: 32,
-    fontWeight: 'bold',
-    color: '#FFFFFF',
-    marginTop: 16,
+    fontFamily: fonts.displayBold,
+    fontSize: 30,
+    color: colors.white,
+    marginTop: spacing.md,
     textAlign: 'center',
   },
   subtitle: {
-    fontSize: 16,
-    color: '#8B9DC3',
-    marginTop: 8,
+    fontFamily: fonts.mono,
+    fontSize: 13,
+    letterSpacing: 1,
+    color: colors.mist,
+    marginTop: spacing.sm,
   },
   features: {
     flexDirection: 'row',
     justifyContent: 'space-around',
-    marginBottom: 48,
+    marginBottom: spacing.xl + spacing.lg,
   },
   featureItem: {
     alignItems: 'center',
   },
   featureText: {
-    color: '#8B9DC3',
+    fontFamily: fonts.body,
+    color: colors.mist,
     fontSize: 12,
-    marginTop: 8,
+    marginTop: spacing.sm,
     textAlign: 'center',
   },
   buttonContainer: {
-    gap: 16,
+    gap: spacing.md,
   },
   userButton: {
-    backgroundColor: '#4A90E2',
+    backgroundColor: colors.current,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    padding: 16,
-    borderRadius: 12,
-    gap: 8,
+    padding: spacing.md,
+    borderRadius: radii.md,
+    gap: spacing.sm,
   },
   adminButton: {
-    backgroundColor: '#E74C3C',
+    backgroundColor: colors.circuit,
+    borderWidth: 1,
+    borderColor: colors.signal + '55',
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    padding: 16,
-    borderRadius: 12,
-    gap: 8,
+    padding: spacing.md,
+    borderRadius: radii.md,
+    gap: spacing.sm,
   },
-  buttonText: {
-    color: '#FFFFFF',
-    fontSize: 18,
-    fontWeight: '600',
-  },
-  signupText: {
-    color: '#4A90E2',
-    textAlign: 'center',
-    marginTop: 24,
+  userButtonText: {
+    fontFamily: fonts.display,
+    color: colors.void,
     fontSize: 16,
   },
+  adminButtonText: {
+    fontFamily: fonts.display,
+    color: colors.white,
+    fontSize: 16,
+  },
+  signupText: {
+    fontFamily: fonts.body,
+    color: colors.current,
+    textAlign: 'center',
+    marginTop: spacing.lg,
+    fontSize: 14,
+  },
   loadingText: {
-    color: '#FFFFFF',
-    fontSize: 18,
+    fontFamily: fonts.body,
+    color: colors.white,
+    fontSize: 16,
     textAlign: 'center',
   },
 });

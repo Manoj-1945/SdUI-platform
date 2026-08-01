@@ -22,6 +22,7 @@ import {
   GOOGLE_ANDROID_CLIENT_ID,
   GOOGLE_IOS_CLIENT_ID,
 } from '../../src/config/googleAuth';
+import { colors, fonts, radii, spacing } from '../../src/theme/tokens';
 
 const BACKEND_URL = Constants.expoConfig?.extra?.EXPO_PUBLIC_BACKEND_URL || process.env.EXPO_PUBLIC_BACKEND_URL;
 
@@ -108,22 +109,22 @@ export default function Login() {
           style={styles.backButton}
           onPress={() => router.back()}
         >
-          <Ionicons name="arrow-back" size={24} color="#FFF" />
+          <Ionicons name="arrow-back" size={24} color={colors.white} />
         </TouchableOpacity>
 
         <View style={styles.header}>
-          <Ionicons name="flash" size={50} color="#FFD700" />
+          <Ionicons name="flash" size={50} color={colors.copper} />
           <Text style={styles.title}>User Login</Text>
           <Text style={styles.subtitle}>Monitor your energy usage</Text>
         </View>
 
         <View style={styles.form}>
           <View style={styles.inputContainer}>
-            <Ionicons name="mail" size={20} color="#8B9DC3" style={styles.inputIcon} />
+            <Ionicons name="mail" size={20} color={colors.mist} style={styles.inputIcon} />
             <TextInput
               style={styles.input}
               placeholder="Email"
-              placeholderTextColor="#8B9DC3"
+              placeholderTextColor={colors.mistDim}
               value={email}
               onChangeText={setEmail}
               keyboardType="email-address"
@@ -132,11 +133,11 @@ export default function Login() {
           </View>
 
           <View style={styles.inputContainer}>
-            <Ionicons name="lock-closed" size={20} color="#8B9DC3" style={styles.inputIcon} />
+            <Ionicons name="lock-closed" size={20} color={colors.mist} style={styles.inputIcon} />
             <TextInput
               style={styles.input}
               placeholder="Password"
-              placeholderTextColor="#8B9DC3"
+              placeholderTextColor={colors.mistDim}
               value={password}
               onChangeText={setPassword}
               secureTextEntry
@@ -164,7 +165,7 @@ export default function Login() {
             onPress={handleGoogleLogin}
             disabled={googleLoading}
           >
-            <Ionicons name="logo-google" size={20} color="#FFF" />
+            <Ionicons name="logo-google" size={20} color={colors.white} />
             <Text style={styles.googleButtonText}>
               {googleLoading ? 'Signing in...' : 'Continue with Google'}
             </Text>
@@ -184,29 +185,30 @@ export default function Login() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#0A0E27',
+    backgroundColor: colors.void,
   },
   scrollContent: {
-    padding: 24,
+    padding: spacing.lg,
     paddingTop: 60,
   },
   backButton: {
-    marginBottom: 24,
+    marginBottom: spacing.lg,
   },
   header: {
     alignItems: 'center',
-    marginBottom: 40,
+    marginBottom: spacing.xl,
   },
   title: {
-    fontSize: 28,
-    fontWeight: 'bold',
-    color: '#FFFFFF',
-    marginTop: 16,
+    fontFamily: fonts.displayBold,
+    fontSize: 26,
+    color: colors.white,
+    marginTop: spacing.md,
   },
   subtitle: {
+    fontFamily: fonts.body,
     fontSize: 14,
-    color: '#8B9DC3',
-    marginTop: 8,
+    color: colors.mist,
+    marginTop: spacing.sm,
   },
   form: {
     width: '100%',
@@ -214,71 +216,79 @@ const styles = StyleSheet.create({
   inputContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#1A1F3A',
-    borderRadius: 12,
-    marginBottom: 16,
-    paddingHorizontal: 16,
+    backgroundColor: colors.circuit,
+    borderRadius: radii.md,
+    marginBottom: spacing.md,
+    paddingHorizontal: spacing.md,
+    borderWidth: 1,
+    borderColor: colors.circuitLight,
   },
   inputIcon: {
-    marginRight: 12,
+    marginRight: spacing.sm + 4,
   },
   input: {
     flex: 1,
-    color: '#FFFFFF',
-    fontSize: 16,
-    paddingVertical: 16,
+    color: colors.white,
+    fontFamily: fonts.body,
+    fontSize: 15,
+    paddingVertical: spacing.md,
   },
   loginButton: {
-    backgroundColor: '#4A90E2',
-    padding: 16,
-    borderRadius: 12,
+    backgroundColor: colors.current,
+    padding: spacing.md,
+    borderRadius: radii.md,
     alignItems: 'center',
-    marginTop: 8,
+    marginTop: spacing.sm,
   },
   disabledButton: {
     opacity: 0.6,
   },
   loginButtonText: {
-    color: '#FFFFFF',
-    fontSize: 18,
-    fontWeight: '600',
+    fontFamily: fonts.display,
+    color: colors.void,
+    fontSize: 16,
   },
   divider: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginVertical: 24,
+    marginVertical: spacing.lg,
   },
   dividerLine: {
     flex: 1,
     height: 1,
-    backgroundColor: '#1A1F3A',
+    backgroundColor: colors.circuitLight,
   },
   dividerText: {
-    color: '#8B9DC3',
-    marginHorizontal: 16,
+    fontFamily: fonts.mono,
+    color: colors.mist,
+    marginHorizontal: spacing.md,
+    fontSize: 11,
   },
   googleButton: {
-    backgroundColor: '#DB4437',
+    backgroundColor: colors.circuit,
+    borderWidth: 1,
+    borderColor: colors.circuitLight,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    padding: 16,
-    borderRadius: 12,
-    gap: 8,
+    padding: spacing.md,
+    borderRadius: radii.md,
+    gap: spacing.sm,
   },
   googleButtonText: {
-    color: '#FFFFFF',
-    fontSize: 16,
-    fontWeight: '600',
+    fontFamily: fonts.display,
+    color: colors.white,
+    fontSize: 15,
   },
   signupText: {
-    color: '#8B9DC3',
+    fontFamily: fonts.body,
+    color: colors.mist,
     textAlign: 'center',
-    marginTop: 24,
+    marginTop: spacing.lg,
     fontSize: 14,
   },
   signupLink: {
-    color: '#4A90E2',
-    fontWeight: '600',
+    fontFamily: fonts.display,
+    color: colors.current,
   },
 });

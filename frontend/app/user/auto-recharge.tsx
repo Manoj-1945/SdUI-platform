@@ -1,8 +1,9 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, Switch, TouchableOpacity, TextInput, Alert } from 'react-native';
+import { View, Text, StyleSheet, Switch, TouchableOpacity, TextInput, Alert, ActivityIndicator } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import api from '../../src/utils/api';
+import { colors, fonts, radii, spacing } from '../../src/theme/tokens';
 
 export default function AutoRechargeScreen() {
   const router = useRouter();
@@ -46,11 +47,19 @@ export default function AutoRechargeScreen() {
     }
   };
 
+  if (initialLoading) {
+    return (
+      <View style={styles.container}>
+        <ActivityIndicator color={colors.current} style={{ marginTop: 100 }} />
+      </View>
+    );
+  }
+
   return (
     <View style={styles.container}>
       <View style={styles.header}>
         <TouchableOpacity onPress={() => router.back()}>
-          <Ionicons name="arrow-back" size={24} color="white" />
+          <Ionicons name="arrow-back" size={24} color={colors.white} />
         </TouchableOpacity>
         <Text style={styles.title}>Auto-Recharge</Text>
         <View style={{ width: 24 }} />
@@ -62,12 +71,13 @@ export default function AutoRechargeScreen() {
           <Switch
             value={isEnabled}
             onValueChange={setIsEnabled}
-            trackColor={{ false: '#767577', true: '#81b0ff' }}
-            thumbColor={isEnabled ? '#f5dd4b' : '#f4f3f4'}
+            trackColor={{ false: colors.mistDim, true: colors.current }}
+            thumbColor={colors.white}
           />
         </View>
         <Text style={styles.description}>
-          When your balance falls below the threshold, we will automatically recharge your account with the specified amount.
+          When your balance falls below the threshold, your wallet will automatically top up
+          by the specified amount.
         </Text>
       </View>
 
@@ -80,21 +90,27 @@ export default function AutoRechargeScreen() {
               value={rechargeAmount}
               onChangeText={setRechargeAmount}
               keyboardType="numeric"
+              placeholderTextColor={colors.mistDim}
             />
           </View>
-          <View style={styles.row}>
+          <View style={[styles.row, { marginBottom: 0 }]}>
             <Text style={styles.label}>Low Balance Threshold (₹)</Text>
             <TextInput
               style={styles.input}
               value={threshold}
               onChangeText={setThreshold}
               keyboardType="numeric"
+              placeholderTextColor={colors.mistDim}
             />
           </View>
         </View>
       )}
 
-      <TouchableOpacity style={styles.saveButton} onPress={handleSave} disabled={loading}>
+      <TouchableOpacity
+        style={[styles.saveButton, loading && styles.saveButtonDisabled]}
+        onPress={handleSave}
+        disabled={loading}
+      >
         <Text style={styles.saveButtonText}>{loading ? 'Saving...' : 'Save Settings'}</Text>
       </TouchableOpacity>
     </View>
@@ -104,60 +120,69 @@ export default function AutoRechargeScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#0A0E27',
-    padding: 24,
+    backgroundColor: colors.void,
+    padding: spacing.lg,
   },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingTop: 40,
-    marginBottom: 20,
+    marginBottom: spacing.lg,
   },
   title: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: 'white',
+    fontFamily: fonts.display,
+    fontSize: 18,
+    color: colors.white,
   },
   card: {
-    backgroundColor: '#1A1F3A',
-    borderRadius: 12,
-    padding: 20,
-    marginBottom: 20,
+    backgroundColor: colors.circuit,
+    borderRadius: radii.md,
+    padding: spacing.lg,
+    marginBottom: spacing.lg,
   },
   row: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 16,
+    marginBottom: spacing.md,
   },
   label: {
-    fontSize: 16,
-    color: 'white',
+    fontFamily: fonts.body,
+    fontSize: 15,
+    color: colors.white,
   },
   description: {
+    fontFamily: fonts.body,
     fontSize: 12,
-    color: '#8B9DC3',
-    marginTop: -10,
+    color: colors.mist,
+    marginTop: -6,
+    lineHeight: 17,
   },
   input: {
-    backgroundColor: '#0A0E27',
-    color: 'white',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 8,
+    backgroundColor: colors.void,
+    color: colors.white,
+    fontFamily: fonts.mono,
+    paddingHorizontal: spacing.sm + 4,
+    paddingVertical: spacing.sm,
+    borderRadius: radii.sm,
     width: 100,
     textAlign: 'right',
+    borderWidth: 1,
+    borderColor: colors.circuitLight,
   },
   saveButton: {
-    backgroundColor: '#4A90E2',
-    borderRadius: 12,
-    padding: 16,
+    backgroundColor: colors.current,
+    borderRadius: radii.md,
+    padding: spacing.md,
     alignItems: 'center',
   },
+  saveButtonDisabled: {
+    opacity: 0.6,
+  },
   saveButtonText: {
-    color: 'white',
+    fontFamily: fonts.display,
+    color: colors.void,
     fontSize: 16,
-    fontWeight: 'bold',
   },
 });

@@ -13,6 +13,7 @@ import {
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import api from '../../src/utils/api';
+import { colors, fonts, radii, spacing } from '../../src/theme/tokens';
 
 export default function DeviceSetup() {
   const router = useRouter();
@@ -28,7 +29,7 @@ export default function DeviceSetup() {
 
     setLoading(true);
     try {
-      const response = await api.post('/api/user/register-device', {
+      await api.post('/api/user/register-device', {
         deviceId: deviceId.trim(),
         deviceName: deviceName.trim() || deviceId.trim(),
       });
@@ -61,44 +62,44 @@ export default function DeviceSetup() {
     >
       <ScrollView contentContainerStyle={styles.content}>
         <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
-          <Ionicons name="arrow-back" size={24} color="#FFF" />
+          <Ionicons name="arrow-back" size={24} color={colors.white} />
         </TouchableOpacity>
 
         <View style={styles.header}>
-          <Ionicons name="hardware-chip" size={64} color="#4A90E2" />
+          <Ionicons name="hardware-chip" size={64} color={colors.current} />
           <Text style={styles.title}>Setup ESP32 Device</Text>
           <Text style={styles.subtitle}>Register your smart energy monitor</Text>
         </View>
 
         <View style={styles.infoCard}>
-          <Ionicons name="information-circle" size={24} color="#4A90E2" />
+          <Ionicons name="information-circle" size={24} color={colors.current} />
           <Text style={styles.infoText}>
-            Enter the Device ID printed on your ESP32 device.
-            Format: ESP32-XXXXXX
+            Enter the same Device ID you set in your ESP32's firmware. This links the
+            physical device to your account.
           </Text>
         </View>
 
         <View style={styles.form}>
           <Text style={styles.label}>Device ID *</Text>
           <View style={styles.inputContainer}>
-            <Ionicons name="barcode" size={20} color="#8B9DC3" style={styles.inputIcon} />
+            <Ionicons name="barcode" size={20} color={colors.mist} style={styles.inputIcon} />
             <TextInput
               style={styles.input}
-              placeholder="ESP32-ABC123"
-              placeholderTextColor="#8B9DC3"
+              placeholder="kitchen_meter"
+              placeholderTextColor={colors.mistDim}
               value={deviceId}
               onChangeText={setDeviceId}
-              autoCapitalize="characters"
+              autoCapitalize="none"
             />
           </View>
 
           <Text style={styles.label}>Device Name (Optional)</Text>
           <View style={styles.inputContainer}>
-            <Ionicons name="pencil" size={20} color="#8B9DC3" style={styles.inputIcon} />
+            <Ionicons name="pencil" size={20} color={colors.mist} style={styles.inputIcon} />
             <TextInput
               style={styles.input}
               placeholder="Living Room Monitor"
-              placeholderTextColor="#8B9DC3"
+              placeholderTextColor={colors.mistDim}
               value={deviceName}
               onChangeText={setDeviceName}
             />
@@ -109,7 +110,7 @@ export default function DeviceSetup() {
             onPress={handleRegisterDevice}
             disabled={loading}
           >
-            <Ionicons name="checkmark-circle" size={24} color="#FFF" />
+            <Ionicons name="checkmark-circle" size={24} color={colors.void} />
             <Text style={styles.registerButtonText}>
               {loading ? 'Registering...' : 'Register Device'}
             </Text>
@@ -118,9 +119,9 @@ export default function DeviceSetup() {
 
         <View style={styles.helpCard}>
           <Text style={styles.helpTitle}>Need Help?</Text>
-          <Text style={styles.helpText}>• Device ID is usually printed on the ESP32 board</Text>
-          <Text style={styles.helpText}>• Make sure device is powered on and connected to WiFi</Text>
-          <Text style={styles.helpText}>• Each device can only be registered once</Text>
+          <Text style={styles.helpText}>• This ID must exactly match DEVICE_ID in your firmware</Text>
+          <Text style={styles.helpText}>• Make sure the device is powered on and connected to WiFi</Text>
+          <Text style={styles.helpText}>• Readings are rejected until the device is registered here</Text>
         </View>
       </ScrollView>
     </KeyboardAvoidingView>
@@ -130,102 +131,110 @@ export default function DeviceSetup() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#0A0E27',
+    backgroundColor: colors.void,
   },
   content: {
-    padding: 24,
+    padding: spacing.lg,
     paddingTop: 60,
   },
   backButton: {
-    marginBottom: 24,
+    marginBottom: spacing.lg,
   },
   header: {
     alignItems: 'center',
-    marginBottom: 32,
+    marginBottom: spacing.xl,
   },
   title: {
-    fontSize: 28,
-    fontWeight: 'bold',
-    color: '#FFFFFF',
-    marginTop: 16,
+    fontFamily: fonts.displayBold,
+    fontSize: 26,
+    color: colors.white,
+    marginTop: spacing.md,
   },
   subtitle: {
+    fontFamily: fonts.body,
     fontSize: 14,
-    color: '#8B9DC3',
-    marginTop: 8,
+    color: colors.mist,
+    marginTop: spacing.sm,
   },
   infoCard: {
     flexDirection: 'row',
-    backgroundColor: '#4A90E220',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 24,
-    gap: 12,
+    backgroundColor: colors.current + '18',
+    borderRadius: radii.md,
+    padding: spacing.md,
+    marginBottom: spacing.lg,
+    gap: spacing.sm + 4,
   },
   infoText: {
     flex: 1,
-    color: '#4A90E2',
-    fontSize: 14,
-    lineHeight: 20,
+    fontFamily: fonts.body,
+    color: colors.current,
+    fontSize: 13,
+    lineHeight: 19,
   },
   form: {
-    marginBottom: 24,
+    marginBottom: spacing.lg,
   },
   label: {
-    fontSize: 14,
-    color: '#8B9DC3',
-    marginBottom: 8,
-    marginTop: 16,
+    fontFamily: fonts.mono,
+    fontSize: 11,
+    letterSpacing: 0.5,
+    color: colors.mist,
+    marginBottom: spacing.sm,
+    marginTop: spacing.md,
   },
   inputContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#1A1F3A',
-    borderRadius: 12,
-    paddingHorizontal: 16,
+    backgroundColor: colors.circuit,
+    borderRadius: radii.md,
+    paddingHorizontal: spacing.md,
+    borderWidth: 1,
+    borderColor: colors.circuitLight,
   },
   inputIcon: {
-    marginRight: 12,
+    marginRight: spacing.sm + 4,
   },
   input: {
     flex: 1,
-    color: '#FFFFFF',
-    fontSize: 16,
-    paddingVertical: 16,
+    color: colors.white,
+    fontFamily: fonts.body,
+    fontSize: 15,
+    paddingVertical: spacing.md,
   },
   registerButton: {
     flexDirection: 'row',
-    backgroundColor: '#4A90E2',
-    padding: 16,
-    borderRadius: 12,
+    backgroundColor: colors.current,
+    padding: spacing.md,
+    borderRadius: radii.md,
     alignItems: 'center',
     justifyContent: 'center',
-    marginTop: 24,
-    gap: 8,
+    marginTop: spacing.lg,
+    gap: spacing.sm,
   },
   disabledButton: {
     opacity: 0.6,
   },
   registerButtonText: {
-    color: '#FFFFFF',
-    fontSize: 18,
-    fontWeight: '600',
+    fontFamily: fonts.display,
+    color: colors.void,
+    fontSize: 16,
   },
   helpCard: {
-    backgroundColor: '#1A1F3A',
-    borderRadius: 12,
-    padding: 20,
+    backgroundColor: colors.circuit,
+    borderRadius: radii.md,
+    padding: spacing.lg,
   },
   helpTitle: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: '#FFFFFF',
-    marginBottom: 12,
+    fontFamily: fonts.display,
+    fontSize: 15,
+    color: colors.white,
+    marginBottom: spacing.sm + 4,
   },
   helpText: {
-    fontSize: 14,
-    color: '#8B9DC3',
-    marginBottom: 8,
-    lineHeight: 20,
+    fontFamily: fonts.body,
+    fontSize: 13,
+    color: colors.mist,
+    marginBottom: spacing.sm,
+    lineHeight: 19,
   },
 });

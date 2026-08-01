@@ -13,6 +13,7 @@ import {
 import { useRouter } from 'expo-router';
 import { useAuthStore } from '../../src/store/authStore';
 import { Ionicons } from '@expo/vector-icons';
+import { colors, fonts, radii, spacing } from '../../src/theme/tokens';
 
 export default function AdminLogin() {
   const router = useRouter();
@@ -48,22 +49,22 @@ export default function AdminLogin() {
           style={styles.backButton}
           onPress={() => router.back()}
         >
-          <Ionicons name="arrow-back" size={24} color="#FFF" />
+          <Ionicons name="arrow-back" size={24} color={colors.white} />
         </TouchableOpacity>
 
         <View style={styles.header}>
-          <Ionicons name="shield" size={50} color="#E74C3C" />
+          <Ionicons name="shield" size={50} color={colors.signal} />
           <Text style={styles.title}>Admin Login</Text>
           <Text style={styles.subtitle}>System Administration</Text>
         </View>
 
         <View style={styles.form}>
           <View style={styles.inputContainer}>
-            <Ionicons name="mail" size={20} color="#8B9DC3" style={styles.inputIcon} />
+            <Ionicons name="mail" size={20} color={colors.mist} style={styles.inputIcon} />
             <TextInput
               style={styles.input}
               placeholder="Admin Email"
-              placeholderTextColor="#8B9DC3"
+              placeholderTextColor={colors.mistDim}
               value={email}
               onChangeText={setEmail}
               keyboardType="email-address"
@@ -72,11 +73,11 @@ export default function AdminLogin() {
           </View>
 
           <View style={styles.inputContainer}>
-            <Ionicons name="lock-closed" size={20} color="#8B9DC3" style={styles.inputIcon} />
+            <Ionicons name="lock-closed" size={20} color={colors.mist} style={styles.inputIcon} />
             <TextInput
               style={styles.input}
               placeholder="Password"
-              placeholderTextColor="#8B9DC3"
+              placeholderTextColor={colors.mistDim}
               value={password}
               onChangeText={setPassword}
               secureTextEntry
@@ -101,29 +102,30 @@ export default function AdminLogin() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#0A0E27',
+    backgroundColor: colors.void,
   },
   scrollContent: {
-    padding: 24,
+    padding: spacing.lg,
     paddingTop: 60,
   },
   backButton: {
-    marginBottom: 24,
+    marginBottom: spacing.lg,
   },
   header: {
     alignItems: 'center',
-    marginBottom: 40,
+    marginBottom: spacing.xl,
   },
   title: {
-    fontSize: 28,
-    fontWeight: 'bold',
-    color: '#FFFFFF',
-    marginTop: 16,
+    fontFamily: fonts.displayBold,
+    fontSize: 26,
+    color: colors.white,
+    marginTop: spacing.md,
   },
   subtitle: {
+    fontFamily: fonts.body,
     fontSize: 14,
-    color: '#8B9DC3',
-    marginTop: 8,
+    color: colors.mist,
+    marginTop: spacing.sm,
   },
   form: {
     width: '100%',
@@ -131,33 +133,36 @@ const styles = StyleSheet.create({
   inputContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#1A1F3A',
-    borderRadius: 12,
-    marginBottom: 16,
-    paddingHorizontal: 16,
+    backgroundColor: colors.circuit,
+    borderRadius: radii.md,
+    marginBottom: spacing.md,
+    paddingHorizontal: spacing.md,
+    borderWidth: 1,
+    borderColor: colors.circuitLight,
   },
   inputIcon: {
-    marginRight: 12,
+    marginRight: spacing.sm + 4,
   },
   input: {
     flex: 1,
-    color: '#FFFFFF',
-    fontSize: 16,
-    paddingVertical: 16,
+    color: colors.white,
+    fontFamily: fonts.body,
+    fontSize: 15,
+    paddingVertical: spacing.md,
   },
   loginButton: {
-    backgroundColor: '#E74C3C',
-    padding: 16,
-    borderRadius: 12,
+    backgroundColor: colors.signal,
+    padding: spacing.md,
+    borderRadius: radii.md,
     alignItems: 'center',
-    marginTop: 8,
+    marginTop: spacing.sm,
   },
   disabledButton: {
     opacity: 0.6,
   },
   loginButtonText: {
-    color: '#FFFFFF',
-    fontSize: 18,
-    fontWeight: '600',
+    fontFamily: fonts.display,
+    color: colors.white,
+    fontSize: 16,
   },
 });
