@@ -13,6 +13,7 @@ import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { LineChart } from 'react-native-chart-kit';
 import api from '../../src/utils/api';
+import { colors, fonts, radii, spacing } from '../../src/theme/tokens';
 
 const screenWidth = Dimensions.get('window').width;
 
@@ -73,7 +74,7 @@ export default function UserDetail() {
 
     return {
       labels,
-      datasets: [{ data, color: () => '#4A90E2' }],
+      datasets: [{ data, color: () => colors.current }],
     };
   };
 
@@ -97,7 +98,7 @@ export default function UserDetail() {
     <ScrollView style={styles.container}>
       <View style={styles.header}>
         <TouchableOpacity onPress={() => router.back()}>
-          <Ionicons name="arrow-back" size={24} color="#FFF" />
+          <Ionicons name="arrow-back" size={24} color={colors.white} />
         </TouchableOpacity>
         <Text style={styles.title}>User Details</Text>
         <View style={{ width: 24 }} />
@@ -107,7 +108,7 @@ export default function UserDetail() {
       <View style={styles.userCard}>
         <View style={styles.userHeader}>
           <View style={styles.userIcon}>
-            <Ionicons name="person" size={40} color="#4A90E2" />
+            <Ionicons name="person" size={40} color={colors.current} />
           </View>
           <View style={styles.userInfo}>
             <Text style={styles.userName}>{user.name}</Text>
@@ -136,12 +137,12 @@ export default function UserDetail() {
           <Switch
             value={powerOn}
             onValueChange={handlePowerControl}
-            trackColor={{ false: '#E74C3C', true: '#27AE60' }}
-            thumbColor="#FFFFFF"
+            trackColor={{ false: colors.signal, true: colors.success }}
+            thumbColor={colors.white}
           />
         </View>
         <View style={[styles.powerStatus, powerOn ? styles.powerStatusOn : styles.powerStatusOff]}>
-          <Ionicons name="flash" size={24} color="#FFF" />
+          <Ionicons name="flash" size={24} color={colors.white} />
           <Text style={styles.powerStatusText}>{powerOn ? 'POWER ON' : 'POWER OFF'}</Text>
         </View>
       </View>
@@ -155,19 +156,19 @@ export default function UserDetail() {
             width={screenWidth - 48}
             height={220}
             chartConfig={{
-              backgroundColor: '#1A1F3A',
-              backgroundGradientFrom: '#1A1F3A',
-              backgroundGradientTo: '#1A1F3A',
+              backgroundColor: colors.circuit,
+              backgroundGradientFrom: colors.circuit,
+              backgroundGradientTo: colors.circuit,
               decimalPlaces: 2,
-              color: (opacity = 1) => `rgba(74, 144, 226, ${opacity})`,
-              labelColor: (opacity = 1) => `rgba(139, 157, 195, ${opacity})`,
+              color: (opacity = 1) => `rgba(45, 212, 191, ${opacity})`,
+              labelColor: (opacity = 1) => `rgba(122, 136, 166, ${opacity})`,
               style: {
                 borderRadius: 16,
               },
               propsForDots: {
                 r: '4',
                 strokeWidth: '2',
-                stroke: '#4A90E2',
+                stroke: colors.current,
               },
             }}
             bezier
@@ -201,178 +202,185 @@ export default function UserDetail() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#0A0E27',
+    backgroundColor: colors.void,
   },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    padding: 24,
+    padding: spacing.lg,
     paddingTop: 60,
   },
   title: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#FFFFFF',
+    fontFamily: fonts.display,
+    fontSize: 18,
+    color: colors.white,
   },
   userCard: {
-    backgroundColor: '#1A1F3A',
-    borderRadius: 16,
-    padding: 20,
-    margin: 24,
+    backgroundColor: colors.circuit,
+    borderRadius: radii.lg,
+    padding: spacing.lg,
+    margin: spacing.lg,
     marginTop: 0,
   },
   userHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 20,
+    marginBottom: spacing.lg,
   },
   userIcon: {
     width: 64,
     height: 64,
-    borderRadius: 32,
-    backgroundColor: '#4A90E220',
+    borderRadius: radii.full,
+    backgroundColor: colors.current + '22',
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: 16,
+    marginRight: spacing.md,
   },
   userInfo: {
     flex: 1,
   },
   userName: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#FFFFFF',
+    fontFamily: fonts.display,
+    fontSize: 19,
+    color: colors.white,
   },
   userEmail: {
-    fontSize: 14,
-    color: '#8B9DC3',
+    fontFamily: fonts.body,
+    fontSize: 13,
+    color: colors.mist,
     marginTop: 4,
   },
   userStats: {
     flexDirection: 'row',
-    gap: 16,
+    gap: spacing.md,
   },
   userStat: {
     flex: 1,
-    backgroundColor: '#0A0E27',
-    borderRadius: 12,
-    padding: 16,
+    backgroundColor: colors.void,
+    borderRadius: radii.md,
+    padding: spacing.md,
   },
   userStatLabel: {
-    fontSize: 12,
-    color: '#8B9DC3',
+    fontFamily: fonts.mono,
+    fontSize: 11,
+    color: colors.mist,
     marginBottom: 4,
   },
   userStatValue: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#4A90E2',
+    fontFamily: fonts.display,
+    fontSize: 17,
+    color: colors.current,
   },
   controlCard: {
-    backgroundColor: '#1A1F3A',
-    borderRadius: 16,
-    padding: 20,
-    margin: 24,
+    backgroundColor: colors.circuit,
+    borderRadius: radii.lg,
+    padding: spacing.lg,
+    margin: spacing.lg,
     marginTop: 0,
   },
   controlHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 16,
+    marginBottom: spacing.md,
   },
   controlTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#FFFFFF',
+    fontFamily: fonts.display,
+    fontSize: 16,
+    color: colors.white,
   },
   controlSubtitle: {
+    fontFamily: fonts.body,
     fontSize: 12,
-    color: '#8B9DC3',
+    color: colors.mist,
     marginTop: 4,
   },
   powerStatus: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    padding: 16,
-    borderRadius: 12,
-    gap: 8,
+    padding: spacing.md,
+    borderRadius: radii.md,
+    gap: spacing.sm,
   },
   powerStatusOn: {
-    backgroundColor: '#27AE60',
+    backgroundColor: colors.success,
   },
   powerStatusOff: {
-    backgroundColor: '#E74C3C',
+    backgroundColor: colors.signal,
   },
   powerStatusText: {
-    color: '#FFFFFF',
-    fontSize: 16,
-    fontWeight: 'bold',
+    fontFamily: fonts.display,
+    color: colors.void,
+    fontSize: 15,
   },
   chartCard: {
-    backgroundColor: '#1A1F3A',
-    borderRadius: 16,
-    padding: 16,
-    margin: 24,
+    backgroundColor: colors.circuit,
+    borderRadius: radii.lg,
+    padding: spacing.md,
+    margin: spacing.lg,
     marginTop: 0,
   },
   chartTitle: {
-    color: '#FFFFFF',
-    fontSize: 16,
-    fontWeight: '600',
-    marginBottom: 16,
+    fontFamily: fonts.display,
+    color: colors.white,
+    fontSize: 15,
+    marginBottom: spacing.md,
   },
   chart: {
-    borderRadius: 16,
+    borderRadius: radii.lg,
   },
   section: {
-    padding: 24,
+    padding: spacing.lg,
     paddingTop: 0,
   },
   sectionTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#FFFFFF',
-    marginBottom: 16,
+    fontFamily: fonts.display,
+    fontSize: 16,
+    color: colors.white,
+    marginBottom: spacing.md,
   },
   readingCard: {
-    backgroundColor: '#1A1F3A',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 12,
+    backgroundColor: colors.circuit,
+    borderRadius: radii.md,
+    padding: spacing.md,
+    marginBottom: spacing.sm + 4,
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
   },
   readingEnergy: {
-    color: '#FFFFFF',
-    fontSize: 16,
-    fontWeight: '600',
+    fontFamily: fonts.display,
+    color: colors.white,
+    fontSize: 15,
   },
   readingTime: {
-    color: '#8B9DC3',
-    fontSize: 12,
+    fontFamily: fonts.mono,
+    color: colors.mist,
+    fontSize: 11,
     marginTop: 4,
   },
   readingDetails: {
     alignItems: 'flex-end',
   },
   readingDetail: {
-    color: '#4A90E2',
-    fontSize: 14,
+    fontFamily: fonts.mono,
+    color: colors.current,
+    fontSize: 13,
     marginTop: 4,
   },
   loadingText: {
-    color: '#FFFFFF',
-    fontSize: 18,
+    fontFamily: fonts.body,
+    color: colors.white,
+    fontSize: 16,
     textAlign: 'center',
     marginTop: 100,
   },
   errorText: {
-    color: '#E74C3C',
-    fontSize: 18,
+    fontFamily: fonts.body,
+    color: colors.signal,
+    fontSize: 16,
     textAlign: 'center',
     marginTop: 100,
   },

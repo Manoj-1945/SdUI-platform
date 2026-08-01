@@ -12,6 +12,7 @@ import { useRouter } from 'expo-router';
 import { useAuthStore } from '../../src/store/authStore';
 import { Ionicons } from '@expo/vector-icons';
 import api from '../../src/utils/api';
+import { colors, fonts, radii, spacing } from '../../src/theme/tokens';
 
 export default function AdminDashboard() {
   const router = useRouter();
@@ -75,7 +76,7 @@ export default function AdminDashboard() {
     <ScrollView
       style={styles.container}
       refreshControl={
-        <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#E74C3C" />
+        <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.signal} />
       }
     >
       {/* Header */}
@@ -89,10 +90,10 @@ export default function AdminDashboard() {
             onPress={() => router.push('/admin/settings')}
             style={styles.settingsButton}
           >
-            <Ionicons name="settings" size={24} color="#4A90E2" />
+            <Ionicons name="settings" size={24} color={colors.current} />
           </TouchableOpacity>
           <TouchableOpacity onPress={handleLogout}>
-            <Ionicons name="log-out" size={28} color="#E74C3C" />
+            <Ionicons name="log-out" size={28} color={colors.signal} />
           </TouchableOpacity>
         </View>
       </View>
@@ -101,14 +102,14 @@ export default function AdminDashboard() {
       <View style={styles.statsSection}>
         <View style={styles.statCard}>
           <View style={styles.statIconContainer}>
-            <Ionicons name="people" size={32} color="#4A90E2" />
+            <Ionicons name="people" size={32} color={colors.current} />
           </View>
           <Text style={styles.statValue}>{stats?.totalUsers || 0}</Text>
           <Text style={styles.statLabel}>Total Users</Text>
         </View>
         <View style={styles.statCard}>
           <View style={styles.statIconContainer}>
-            <Ionicons name="receipt" size={32} color="#E74C3C" />
+            <Ionicons name="receipt" size={32} color={colors.signal} />
           </View>
           <Text style={styles.statValue}>{stats?.unpaidBills || 0}</Text>
           <Text style={styles.statLabel}>Unpaid Bills</Text>
@@ -117,7 +118,7 @@ export default function AdminDashboard() {
 
       <View style={styles.revenueCard}>
         <View style={styles.revenueIconContainer}>
-          <Ionicons name="cash" size={40} color="#27AE60" />
+          <Ionicons name="cash" size={40} color={colors.success} />
         </View>
         <View>
           <Text style={styles.revenueLabel}>Total Revenue</Text>
@@ -135,7 +136,7 @@ export default function AdminDashboard() {
             onPress={() => handleUserPress(user.user_id)}
           >
             <View style={styles.userIcon}>
-              <Ionicons name="person" size={24} color="#4A90E2" />
+              <Ionicons name="person" size={24} color={colors.current} />
             </View>
             <View style={styles.userInfo}>
               <Text style={styles.userName}>{user.name}</Text>
@@ -143,7 +144,7 @@ export default function AdminDashboard() {
             </View>
             <View style={styles.userStats}>
               <Text style={styles.userBalance}>₹{user.balance?.toFixed(2)}</Text>
-              <Ionicons name="chevron-forward" size={20} color="#8B9DC3" />
+              <Ionicons name="chevron-forward" size={20} color={colors.mist} />
             </View>
           </TouchableOpacity>
         ))}
@@ -155,130 +156,139 @@ export default function AdminDashboard() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#0A0E27',
+    backgroundColor: colors.void,
   },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    padding: 24,
+    padding: spacing.lg,
     paddingTop: 60,
   },
   headerActions: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 16,
+    gap: spacing.md,
   },
   settingsButton: {
     padding: 4,
   },
   greeting: {
-    fontSize: 16,
-    color: '#8B9DC3',
+    fontFamily: fonts.mono,
+    fontSize: 11,
+    letterSpacing: 2,
+    color: colors.mist,
   },
   userName: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#FFFFFF',
+    fontFamily: fonts.display,
+    fontSize: 19,
+    color: colors.white,
     marginTop: 4,
   },
   statsSection: {
     flexDirection: 'row',
-    padding: 24,
+    padding: spacing.lg,
     paddingTop: 0,
-    gap: 12,
+    gap: spacing.sm + 4,
   },
   statCard: {
     flex: 1,
-    backgroundColor: '#1A1F3A',
-    borderRadius: 16,
-    padding: 20,
+    backgroundColor: colors.circuit,
+    borderRadius: radii.lg,
+    padding: spacing.lg,
     alignItems: 'center',
   },
   statIconContainer: {
-    marginBottom: 12,
+    marginBottom: spacing.sm + 4,
   },
   statValue: {
-    fontSize: 32,
-    fontWeight: 'bold',
-    color: '#FFFFFF',
+    fontFamily: fonts.displayBold,
+    fontSize: 30,
+    color: colors.white,
     marginBottom: 4,
   },
   statLabel: {
-    fontSize: 12,
-    color: '#8B9DC3',
+    fontFamily: fonts.mono,
+    fontSize: 10,
+    letterSpacing: 0.5,
+    color: colors.mist,
     textAlign: 'center',
   },
   revenueCard: {
     flexDirection: 'row',
-    backgroundColor: '#1A1F3A',
-    borderRadius: 16,
-    padding: 20,
-    margin: 24,
+    backgroundColor: colors.circuit,
+    borderRadius: radii.lg,
+    padding: spacing.lg,
+    margin: spacing.lg,
     marginTop: 0,
     alignItems: 'center',
+    borderWidth: 1,
+    borderColor: colors.success + '33',
   },
   revenueIconContainer: {
-    marginRight: 16,
+    marginRight: spacing.md,
   },
   revenueLabel: {
-    fontSize: 14,
-    color: '#8B9DC3',
+    fontFamily: fonts.mono,
+    fontSize: 11,
+    color: colors.mist,
     marginBottom: 4,
   },
   revenueValue: {
-    fontSize: 28,
-    fontWeight: 'bold',
-    color: '#27AE60',
+    fontFamily: fonts.displayBold,
+    fontSize: 26,
+    color: colors.success,
   },
   section: {
-    padding: 24,
+    padding: spacing.lg,
     paddingTop: 0,
   },
   sectionTitle: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#FFFFFF',
-    marginBottom: 16,
+    fontFamily: fonts.display,
+    fontSize: 18,
+    color: colors.white,
+    marginBottom: spacing.md,
   },
   userCard: {
     flexDirection: 'row',
-    backgroundColor: '#1A1F3A',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 12,
+    backgroundColor: colors.circuit,
+    borderRadius: radii.md,
+    padding: spacing.md,
+    marginBottom: spacing.sm + 4,
     alignItems: 'center',
   },
   userIcon: {
     width: 48,
     height: 48,
-    borderRadius: 24,
-    backgroundColor: '#4A90E220',
+    borderRadius: radii.full,
+    backgroundColor: colors.current + '22',
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: 12,
+    marginRight: spacing.sm + 4,
   },
   userInfo: {
     flex: 1,
   },
   userEmail: {
+    fontFamily: fonts.body,
     fontSize: 12,
-    color: '#8B9DC3',
+    color: colors.mist,
     marginTop: 4,
   },
   userStats: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    gap: spacing.sm,
   },
   userBalance: {
+    fontFamily: fonts.display,
     fontSize: 14,
-    fontWeight: '600',
-    color: '#27AE60',
+    color: colors.success,
   },
   loadingText: {
-    color: '#FFFFFF',
-    fontSize: 18,
+    fontFamily: fonts.body,
+    color: colors.white,
+    fontSize: 16,
     textAlign: 'center',
     marginTop: 100,
   },

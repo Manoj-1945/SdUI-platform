@@ -11,6 +11,7 @@ import {
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import api from '../../src/utils/api';
+import { colors, fonts, radii, spacing } from '../../src/theme/tokens';
 
 export default function AdminSettings() {
   const router = useRouter();
@@ -114,7 +115,7 @@ export default function AdminSettings() {
     <View style={styles.container}>
       <View style={styles.header}>
         <TouchableOpacity onPress={() => router.back()}>
-          <Ionicons name="arrow-back" size={24} color="#FFF" />
+          <Ionicons name="arrow-back" size={24} color={colors.white} />
         </TouchableOpacity>
         <Text style={styles.title}>Admin Management</Text>
         <View style={{ width: 24 }} />
@@ -134,7 +135,7 @@ export default function AdminSettings() {
                 onChangeText={setTariffRate}
                 keyboardType="decimal-pad"
                 placeholder="8.0"
-                placeholderTextColor="#8B9DC3"
+                placeholderTextColor={colors.mistDim}
               />
               <Text style={styles.unitText}>/kWh</Text>
             </View>
@@ -142,7 +143,7 @@ export default function AdminSettings() {
               style={styles.updateButton}
               onPress={handleUpdateGlobalTariff}
             >
-              <Ionicons name="flash" size={20} color="#FFF" />
+              <Ionicons name="flash" size={20} color={colors.white} />
               <Text style={styles.updateButtonText}>Update All Users</Text>
             </TouchableOpacity>
           </View>
@@ -167,7 +168,7 @@ export default function AdminSettings() {
                   style={styles.iconButton}
                   onPress={() => handleUpdateUserTariff(user.user_id, user.tariffRate)}
                 >
-                  <Ionicons name="create" size={20} color="#4A90E2" />
+                  <Ionicons name="create" size={20} color={colors.current} />
                 </TouchableOpacity>
               </View>
             </View>
@@ -190,7 +191,7 @@ export default function AdminSettings() {
               </View>
               <View style={styles.userActions}>
                 <View style={styles.unpaidBadge}>
-                  <Ionicons name="alert-circle" size={16} color="#E74C3C" />
+                  <Ionicons name="alert-circle" size={16} color={colors.signal} />
                   <Text style={styles.unpaidText}>Unpaid</Text>
                 </View>
                 <TouchableOpacity
@@ -199,7 +200,7 @@ export default function AdminSettings() {
                     router.push(`/admin/user-detail?userId=${user.user_id}`)
                   }
                 >
-                  <Ionicons name="chevron-forward" size={20} color="#8B9DC3" />
+                  <Ionicons name="chevron-forward" size={20} color={colors.mist} />
                 </TouchableOpacity>
               </View>
             </View>
@@ -224,7 +225,7 @@ export default function AdminSettings() {
                 </Text>
               </View>
               <View style={styles.consumptionBadge}>
-                <Ionicons name="trending-up" size={16} color="#F39C12" />
+                <Ionicons name="trending-up" size={16} color={colors.copper} />
                 <Text style={styles.consumptionText}>
                   {item.avgPower.toFixed(0)}W
                 </Text>
@@ -243,161 +244,168 @@ export default function AdminSettings() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#0A0E27',
+    backgroundColor: colors.void,
   },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    padding: 24,
+    padding: spacing.lg,
     paddingTop: 60,
   },
   title: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#FFFFFF',
+    fontFamily: fonts.display,
+    fontSize: 18,
+    color: colors.white,
   },
   content: {
     flex: 1,
   },
   section: {
-    padding: 24,
+    padding: spacing.lg,
     paddingTop: 0,
   },
   sectionTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#FFFFFF',
-    marginBottom: 16,
+    fontFamily: fonts.display,
+    fontSize: 16,
+    color: colors.white,
+    marginBottom: spacing.md,
   },
   tariffCard: {
-    backgroundColor: '#1A1F3A',
-    borderRadius: 16,
-    padding: 20,
+    backgroundColor: colors.circuit,
+    borderRadius: radii.lg,
+    padding: spacing.lg,
   },
   tariffLabel: {
-    fontSize: 14,
-    color: '#8B9DC3',
-    marginBottom: 12,
+    fontFamily: fonts.body,
+    fontSize: 13,
+    color: colors.mist,
+    marginBottom: spacing.sm + 4,
   },
   tariffInput: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#0A0E27',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 16,
+    backgroundColor: colors.void,
+    borderRadius: radii.md,
+    padding: spacing.md,
+    marginBottom: spacing.md,
+    borderWidth: 1,
+    borderColor: colors.circuitLight,
   },
   rupeeSymbol: {
+    fontFamily: fonts.display,
     fontSize: 20,
-    fontWeight: 'bold',
-    color: '#4A90E2',
-    marginRight: 8,
+    color: colors.current,
+    marginRight: spacing.sm,
   },
   input: {
     flex: 1,
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: '#FFFFFF',
+    fontFamily: fonts.displayBold,
+    fontSize: 22,
+    color: colors.white,
   },
   unitText: {
-    fontSize: 14,
-    color: '#8B9DC3',
-    marginLeft: 8,
+    fontFamily: fonts.mono,
+    fontSize: 13,
+    color: colors.mist,
+    marginLeft: spacing.sm,
   },
   updateButton: {
     flexDirection: 'row',
-    backgroundColor: '#4A90E2',
-    padding: 16,
-    borderRadius: 12,
+    backgroundColor: colors.current,
+    padding: spacing.md,
+    borderRadius: radii.md,
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 8,
+    gap: spacing.sm,
   },
   updateButtonText: {
-    color: '#FFFFFF',
-    fontSize: 16,
-    fontWeight: '600',
+    fontFamily: fonts.display,
+    color: colors.void,
+    fontSize: 15,
   },
   userCard: {
     flexDirection: 'row',
-    backgroundColor: '#1A1F3A',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 12,
+    backgroundColor: colors.circuit,
+    borderRadius: radii.md,
+    padding: spacing.md,
+    marginBottom: spacing.sm + 4,
     alignItems: 'center',
   },
   userInfo: {
     flex: 1,
   },
   userName: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#FFFFFF',
+    fontFamily: fonts.display,
+    fontSize: 15,
+    color: colors.white,
   },
   userEmail: {
+    fontFamily: fonts.body,
     fontSize: 12,
-    color: '#8B9DC3',
+    color: colors.mist,
     marginTop: 4,
   },
   userActions: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
+    gap: spacing.sm + 4,
   },
   balanceText: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: '#F39C12',
+    fontFamily: fonts.display,
+    fontSize: 15,
+    color: colors.copper,
   },
   iconButton: {
-    padding: 8,
+    padding: spacing.sm,
   },
   unpaidBadge: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#E74C3C20',
-    paddingHorizontal: 12,
+    backgroundColor: colors.signal + '22',
+    paddingHorizontal: spacing.sm + 4,
     paddingVertical: 6,
-    borderRadius: 6,
+    borderRadius: radii.sm,
     gap: 4,
   },
   unpaidText: {
-    color: '#E74C3C',
-    fontSize: 12,
-    fontWeight: 'bold',
+    fontFamily: fonts.display,
+    color: colors.signal,
+    fontSize: 11,
   },
   consumptionCard: {
     flexDirection: 'row',
-    backgroundColor: '#1A1F3A',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 12,
+    backgroundColor: colors.circuit,
+    borderRadius: radii.md,
+    padding: spacing.md,
+    marginBottom: spacing.sm + 4,
     alignItems: 'center',
   },
   consumptionStats: {
-    fontSize: 12,
-    color: '#8B9DC3',
+    fontFamily: fonts.mono,
+    fontSize: 11,
+    color: colors.mist,
     marginTop: 4,
   },
   consumptionBadge: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#F39C1220',
-    paddingHorizontal: 12,
+    backgroundColor: colors.copper + '22',
+    paddingHorizontal: spacing.sm + 4,
     paddingVertical: 6,
-    borderRadius: 6,
+    borderRadius: radii.sm,
     gap: 4,
   },
   consumptionText: {
-    color: '#F39C12',
-    fontSize: 12,
-    fontWeight: 'bold',
+    fontFamily: fonts.display,
+    color: colors.copper,
+    fontSize: 11,
   },
   emptyText: {
-    color: '#8B9DC3',
-    fontSize: 14,
+    fontFamily: fonts.body,
+    color: colors.mist,
+    fontSize: 13,
     textAlign: 'center',
-    padding: 20,
+    padding: spacing.lg,
   },
 });
