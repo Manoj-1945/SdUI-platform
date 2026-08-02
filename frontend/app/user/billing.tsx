@@ -34,6 +34,27 @@ export default function Billing() {
     }
   };
 
+  const handleExportCsv = async () => {
+    if (Platform.OS !== 'web') {
+      Alert.alert('Not supported yet', 'CSV export is currently only available on the web app.');
+      return;
+    }
+    try {
+      const response = await api.get('/api/user/bills/export', { responseType: 'blob' });
+      const blob = new Blob([response.data], { type: 'text/csv' });
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = 'bills.csv';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+    } catch (error: any) {
+      Alert.alert('Error', 'Could not export CSV');
+    }
+  };
+
   const loadRazorpayScript = (): Promise<boolean> => {
     return new Promise((resolve) => {
       if (typeof window === 'undefined') {
@@ -147,9 +168,14 @@ export default function Billing() {
           <Ionicons name="arrow-back" size={24} color={colors.white} />
         </TouchableOpacity>
         <Text style={styles.title}>Bills & Payments</Text>
-        <TouchableOpacity onPress={() => router.push('/user/consumer-profile')}>
-          <Ionicons name="person-circle-outline" size={24} color={colors.white} />
-        </TouchableOpacity>
+        <View style={styles.headerActions}>
+          <TouchableOpacity onPress={handleExportCsv}>
+            <Ionicons name="download-outline" size={22} color={colors.white} />
+          </TouchableOpacity>
+          <TouchableOpacity onPress={() => router.push('/user/consumer-profile')}>
+            <Ionicons name="person-circle-outline" size={24} color={colors.white} />
+          </TouchableOpacity>
+        </View>
       </View>
 
       <ScrollView style={styles.content}>
@@ -248,6 +274,11 @@ const styles = StyleSheet.create({
     fontFamily: fonts.display,
     fontSize: 18,
     color: colors.white,
+  },
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
   },
   content: {
     flex: 1,

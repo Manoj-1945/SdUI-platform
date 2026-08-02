@@ -8,6 +8,8 @@ from datetime import datetime, timezone, timedelta
 from dotenv import load_dotenv
 import json
 import os
+import csv
+import io
 import uuid
 import bcrypt
 import razorpay
@@ -1069,6 +1071,74 @@ async def get_energy_history(period: str, comparison: str = "none", request: Req
             "comparisonReadings": [reading_to_dict(item) for item in comparison_readings],
             "summary": summary,
         }
+    finally:
+        db.close()
+
+
+@app.get("/api/user/energy-history/export")
+async def export_energy_history_csv(period: str, request: Request, authorization: Optional[str] = Header(None)):
+    user = await get_current_user(authorization, request)
+    db = SessionLocal()
+    try:
+        now = datetime.now(timezone.utc)
+        if period == "daily":
+            start_date = now - timedelta(days=1)
+        elif period == "weekly":
+            start_date = now - timedelta(days=7)
+        elif period == "monthly":
+            start_date = now - timedelta(days=30)
+        elif period == "all":
+            start_date = datetime(2000, 1, 1, tzinfo=timezone.utc)
+        else:
+            start_date = now - timedelta(days=7)
+
+        readings = db.query(EnergyReading).filter(
+            EnergyReading.userId == user.user_id, EnergyReading.timestamp >= start_date
+        ).order_by(EnergyReading.timestamp.asc()).all()
+
+        buffer = io.StringIO()
+        writer = csv.writer(buffer)
+        writer.writerow(["Timestamp", "Voltage (V)", "Current (A)", "Power (W)", "Energy (kWh)"])
+        for r in readings:
+            writer.writerow([
+                r.timestamp.isoformat() if r.timestamp else "",
+                r.voltage, r.current, r.power, r.energy,
+            ])
+
+        return Response(
+            content=buffer.getvalue(),
+            media_type="text/csv",
+            headers={"Content-Disposition": f"attachment; filename=energy_history_{period}.csv"},
+        )
+    finally:
+        db.close()
+
+
+@app.get("/api/user/bills/export")
+async def export_bills_csv(request: Request, authorization: Optional[str] = Header(None)):
+    user = await get_current_user(authorization, request)
+    db = SessionLocal()
+    try:
+        bills = db.query(Bill).filter(Bill.userId == user.user_id).order_by(Bill.generatedAt.desc()).all()
+
+        buffer = io.StringIO()
+        writer = csv.writer(buffer)
+        writer.writerow(["Bill ID", "Amount (Rs)", "Status", "Generated", "Paid", "Due Date"])
+        for b in bills:
+            writer.writerow([
+                b.billId,
+                b.amount,
+                b.status,
+                b.generatedAt.isoformat() if b.generatedAt else "",
+                b.paidAt.isoformat() if b.paidAt else "",
+                b.dueDate.isoformat() if b.dueDate else "",
+            ])
+
+        return Response(
+            content=buffer.getvalue(),
+            media_type="text/csv",
+            headers={"Content-Disposition": "attachment; filename=bills.csv"},
+        )
     finally:
         db.close()
 

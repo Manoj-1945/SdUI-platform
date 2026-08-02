@@ -7,6 +7,7 @@ import {
   TouchableOpacity,
   TextInput,
   Alert,
+  Modal,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -20,6 +21,8 @@ export default function AdminSettings() {
   const [unpaidUsers, setUnpaidUsers] = useState<any[]>([]);
   const [highConsumptionUsers, setHighConsumptionUsers] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [editingUser, setEditingUser] = useState<{ userId: string; currentRate: number } | null>(null);
+  const [editRateInput, setEditRateInput] = useState('');
 
   useEffect(() => {
     fetchProblematicUsers();
@@ -79,36 +82,29 @@ export default function AdminSettings() {
     );
   };
 
-  const handleUpdateUserTariff = async (userId: string, currentRate: number) => {
-    Alert.prompt(
-      'Update User Tariff',
-      `Current rate: ₹${currentRate}/kWh\nEnter new rate:`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Update',
-          onPress: async (newRate) => {
-            const rate = parseFloat(newRate || '0');
-            if (isNaN(rate) || rate <= 0) {
-              Alert.alert('Error', 'Invalid rate');
-              return;
-            }
+  const handleUpdateUserTariff = (userId: string, currentRate: number) => {
+    setEditingUser({ userId, currentRate });
+    setEditRateInput(currentRate.toString());
+  };
 
-            try {
-              await api.put(
-                `/api/admin/update-tariff?user_id=${userId}&new_rate=${rate}`
-              );
-              Alert.alert('Success', 'Tariff updated for user');
-              fetchProblematicUsers();
-            } catch (error: any) {
-              Alert.alert('Error', error.response?.data?.detail || 'Update failed');
-            }
-          },
-        },
-      ],
-      'plain-text',
-      currentRate.toString()
-    );
+  const handleSaveUserTariff = async () => {
+    if (!editingUser) return;
+    const rate = parseFloat(editRateInput);
+    if (isNaN(rate) || rate <= 0) {
+      Alert.alert('Error', 'Invalid rate');
+      return;
+    }
+
+    try {
+      await api.put(
+        `/api/admin/update-tariff?user_id=${editingUser.userId}&new_rate=${rate}`
+      );
+      Alert.alert('Success', 'Tariff updated for user');
+      setEditingUser(null);
+      fetchProblematicUsers();
+    } catch (error: any) {
+      Alert.alert('Error', error.response?.data?.detail || 'Update failed');
+    }
   };
 
   return (
@@ -237,6 +233,44 @@ export default function AdminSettings() {
           )}
         </View>
       </ScrollView>
+
+      <Modal
+        visible={editingUser !== null}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setEditingUser(null)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <Text style={styles.modalTitle}>Update User Tariff</Text>
+            <Text style={styles.modalSubtitle}>
+              Current rate: ₹{editingUser?.currentRate}/kWh
+            </Text>
+
+            <TextInput
+              style={styles.modalInput}
+              placeholder="New rate"
+              placeholderTextColor={colors.mistDim}
+              value={editRateInput}
+              onChangeText={setEditRateInput}
+              keyboardType="decimal-pad"
+              autoFocus
+            />
+
+            <View style={styles.modalButtons}>
+              <TouchableOpacity
+                style={styles.modalCancelButton}
+                onPress={() => setEditingUser(null)}
+              >
+                <Text style={styles.modalCancelText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.modalSaveButton} onPress={handleSaveUserTariff}>
+                <Text style={styles.modalSaveText}>Update</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -407,5 +441,70 @@ const styles = StyleSheet.create({
     fontSize: 13,
     textAlign: 'center',
     padding: spacing.lg,
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(11, 14, 20, 0.85)',
+    justifyContent: 'center',
+    padding: spacing.lg,
+  },
+  modalContent: {
+    backgroundColor: colors.circuit,
+    borderRadius: radii.lg,
+    padding: spacing.lg,
+  },
+  modalTitle: {
+    fontFamily: fonts.display,
+    fontSize: 20,
+    color: colors.white,
+    textAlign: 'center',
+  },
+  modalSubtitle: {
+    fontFamily: fonts.mono,
+    fontSize: 13,
+    color: colors.current,
+    textAlign: 'center',
+    marginTop: spacing.sm,
+    marginBottom: spacing.lg,
+  },
+  modalInput: {
+    backgroundColor: colors.void,
+    borderRadius: radii.sm,
+    padding: spacing.md,
+    fontSize: 18,
+    fontFamily: fonts.displayBold,
+    color: colors.white,
+    marginBottom: spacing.lg,
+    borderWidth: 1,
+    borderColor: colors.circuitLight,
+    textAlign: 'center',
+  },
+  modalButtons: {
+    flexDirection: 'row',
+    gap: spacing.sm + 4,
+  },
+  modalCancelButton: {
+    flex: 1,
+    backgroundColor: colors.circuitLight,
+    padding: spacing.md,
+    borderRadius: radii.sm,
+    alignItems: 'center',
+  },
+  modalCancelText: {
+    fontFamily: fonts.display,
+    color: colors.mist,
+    fontSize: 15,
+  },
+  modalSaveButton: {
+    flex: 1,
+    backgroundColor: colors.current,
+    padding: spacing.md,
+    borderRadius: radii.sm,
+    alignItems: 'center',
+  },
+  modalSaveText: {
+    fontFamily: fonts.display,
+    color: colors.void,
+    fontSize: 15,
   },
 });
