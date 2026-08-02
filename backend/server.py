@@ -184,6 +184,23 @@ class AutoRechargeSettings(Base):
     updatedAt = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
 
+class PaymentMandate(Base):
+    """A real Razorpay recurring payment mandate (UPI Autopay or saved
+    card), distinct from AutoRechargeSettings above which just tops up an
+    internal wallet number. This one authorizes Razorpay to actually
+    charge real money automatically when a new bill is generated."""
+    __tablename__ = "payment_mandates"
+    id = Column(Integer, primary_key=True)
+    userId = Column(String, unique=True, nullable=False, index=True)
+    razorpayCustomerId = Column(String, nullable=False)
+    razorpayTokenId = Column(String, nullable=True)  # set once authorization completes
+    contactPhone = Column(String, nullable=False)
+    maxAmount = Column(Float, default=5000.0)  # mandate ceiling - Razorpay won't allow charges above this
+    status = Column(String, default="pending")  # pending, active, cancelled, failed
+    createdAt = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updatedAt = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+
 class PowerControl(Base):
     __tablename__ = "power_control"
     id = Column(Integer, primary_key=True)
@@ -293,6 +310,71 @@ def compute_bill_breakdown(units: float, tariff_rate: float, subsidized: bool = 
     }
 
 
+def attempt_recurring_charge(db, user, bill) -> bool:
+    """If this user has an active UPI Autopay/card mandate covering the
+    bill amount, silently charges it via Razorpay's recurring payments
+    API and marks the bill paid on success. Returns True if charged.
+    Never raises - a failed auto-charge should just leave the bill
+    unpaid for manual payment, not break bill generation."""
+    mandate = db.query(PaymentMandate).filter(
+        PaymentMandate.userId == user.user_id, PaymentMandate.status == "active"
+    ).first()
+    if not mandate or not mandate.razorpayTokenId:
+        return False
+    if bill.amount > mandate.maxAmount:
+        send_push_to_user(
+            db, user.user_id, "Auto-pay skipped",
+            f"Your bill of Rs.{bill.amount:.2f} exceeds your Rs.{mandate.maxAmount:.2f} auto-pay limit. Please pay manually.",
+        )
+        return False
+
+    try:
+        charge_order = razorpay_client.order.create({
+            "amount": int(round(bill.amount * 100)),
+            "currency": "INR",
+            "customer_id": mandate.razorpayCustomerId,
+            "receipt": bill.billId,
+        })
+        result = razorpay_client.payment.createRecurring({
+            "email": user.email,
+            "contact": mandate.contactPhone,
+            "amount": int(round(bill.amount * 100)),
+            "currency": "INR",
+            "order_id": charge_order["id"],
+            "customer_id": mandate.razorpayCustomerId,
+            "token": mandate.razorpayTokenId,
+            "recurring": "1",
+        })
+
+        if result.get("status") in ("captured", "authorized"):
+            bill.status = "paid"
+            bill.paidAt = datetime.now(timezone.utc)
+            db.add(Payment(
+                paymentId=result.get("id", f"pay_{uuid.uuid4().hex[:12]}"),
+                userId=user.user_id,
+                billId=bill.billId,
+                amount=bill.amount,
+                paymentDate=datetime.now(timezone.utc),
+                method="upi_autopay",
+            ))
+            db.add(Notification(
+                notifId=f"notif_{uuid.uuid4().hex[:12]}",
+                userId=user.user_id,
+                type="payment",
+                message=f"Auto-pay charged Rs.{bill.amount:.2f} for your new bill.",
+                data=None,
+            ))
+            send_push_to_user(db, user.user_id, "Auto-pay successful", f"Rs.{bill.amount:.2f} charged automatically.")
+            return True
+        else:
+            send_push_to_user(db, user.user_id, "Auto-pay failed", "Your bill is ready - please pay manually.")
+            return False
+    except Exception as exc:
+        print(f"[recurring-payment] charge failed for user {user.user_id}: {exc}")
+        send_push_to_user(db, user.user_id, "Auto-pay failed", "Your bill is ready - please pay manually.")
+        return False
+
+
 def generate_bill_for_user(db, user):
     """Sums a user's energy readings since their last bill (or account
     creation, if they've never had one), computes a real ESCOM-style
@@ -377,6 +459,10 @@ def generate_bill_for_user(db, user):
         "Bill fully covered" if fully_covered else "New bill generated",
         "Nothing to pay this period." if fully_covered else f"Your new bill of Rs.{max(0.0, total_payable):.2f} is ready to pay.",
     )
+
+    if not fully_covered:
+        attempt_recurring_charge(db, user, bill)
+
     return bill
 
 
@@ -1281,6 +1367,157 @@ async def verify_payment(verify_req: VerifyPaymentRequest, request: Request, aut
         send_push_to_user(db, user.user_id, "Payment successful", f"Rs.{bill.amount} received via Razorpay.")
         db.commit()
         return {"message": "Payment verified and bill marked as paid"}
+    finally:
+        db.close()
+
+
+class SetupRecurringPaymentRequest(BaseModel):
+    contactPhone: str
+    maxAmount: float = 5000.0
+
+
+class ConfirmRecurringPaymentRequest(BaseModel):
+    razorpay_payment_id: str
+    razorpay_order_id: str
+    razorpay_signature: str
+
+
+AUTHORIZATION_AMOUNT_PAISE = 100  # Rs.1 token authorization charge, standard practice for mandate registration
+
+
+@app.post("/api/user/recurring-payment/setup")
+async def setup_recurring_payment(req: SetupRecurringPaymentRequest, request: Request, authorization: Optional[str] = Header(None)):
+    user = await get_current_user(authorization, request)
+    if req.maxAmount <= 0:
+        raise HTTPException(status_code=400, detail="maxAmount must be positive")
+
+    db = SessionLocal()
+    try:
+        existing = db.query(PaymentMandate).filter(PaymentMandate.userId == user.user_id).first()
+        if existing and existing.status == "active":
+            raise HTTPException(status_code=400, detail="Auto-pay is already active. Cancel it first to set up again.")
+
+        try:
+            customer = razorpay_client.customer.create({
+                "name": user.name,
+                "email": user.email,
+                "contact": req.contactPhone,
+                "fail_existing": 0,  # reuse existing Razorpay customer for this email/contact if one exists
+            })
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=f"Could not create payment customer: {exc}")
+
+        try:
+            auth_order = razorpay_client.order.create({
+                "amount": AUTHORIZATION_AMOUNT_PAISE,
+                "currency": "INR",
+                "customer_id": customer["id"],
+                "recurring": "1",
+                "notes": {"purpose": "auto_pay_mandate_registration"},
+            })
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=f"Could not create authorization order: {exc}")
+
+        if existing:
+            existing.razorpayCustomerId = customer["id"]
+            existing.contactPhone = req.contactPhone
+            existing.maxAmount = req.maxAmount
+            existing.status = "pending"
+            existing.updatedAt = datetime.now(timezone.utc)
+        else:
+            db.add(PaymentMandate(
+                userId=user.user_id,
+                razorpayCustomerId=customer["id"],
+                contactPhone=req.contactPhone,
+                maxAmount=req.maxAmount,
+                status="pending",
+            ))
+        db.commit()
+
+        return {
+            "orderId": auth_order["id"],
+            "amount": auth_order["amount"],
+            "currency": auth_order["currency"],
+            "keyId": RAZORPAY_KEY_ID,
+            "customerId": customer["id"],
+        }
+    finally:
+        db.close()
+
+
+@app.post("/api/user/recurring-payment/confirm")
+async def confirm_recurring_payment(req: ConfirmRecurringPaymentRequest, request: Request, authorization: Optional[str] = Header(None)):
+    user = await get_current_user(authorization, request)
+    db = SessionLocal()
+    try:
+        mandate = db.query(PaymentMandate).filter(PaymentMandate.userId == user.user_id).first()
+        if not mandate:
+            raise HTTPException(status_code=404, detail="No pending auto-pay setup found")
+
+        try:
+            razorpay_client.utility.verify_payment_signature({
+                "razorpay_order_id": req.razorpay_order_id,
+                "razorpay_payment_id": req.razorpay_payment_id,
+                "razorpay_signature": req.razorpay_signature,
+            })
+        except razorpay.errors.SignatureVerificationError:
+            mandate.status = "failed"
+            db.commit()
+            raise HTTPException(status_code=400, detail="Authorization verification failed")
+
+        try:
+            payment = razorpay_client.payment.fetch(req.razorpay_payment_id)
+            token_id = payment.get("token_id")
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=f"Could not retrieve payment token: {exc}")
+
+        if not token_id:
+            mandate.status = "failed"
+            db.commit()
+            raise HTTPException(status_code=502, detail="No reusable token was returned - auto-pay setup failed")
+
+        mandate.razorpayTokenId = token_id
+        mandate.status = "active"
+        mandate.updatedAt = datetime.now(timezone.utc)
+        db.add(Notification(
+            notifId=f"notif_{uuid.uuid4().hex[:12]}",
+            userId=user.user_id,
+            type="payment",
+            message="Auto-pay is now active. Future bills will be charged automatically.",
+            data=None,
+        ))
+        db.commit()
+        return {"message": "Auto-pay activated successfully"}
+    finally:
+        db.close()
+
+
+@app.get("/api/user/recurring-payment/status")
+async def get_recurring_payment_status(request: Request, authorization: Optional[str] = Header(None)):
+    user = await get_current_user(authorization, request)
+    db = SessionLocal()
+    try:
+        mandate = db.query(PaymentMandate).filter(PaymentMandate.userId == user.user_id).first()
+        if not mandate:
+            return {"status": "none", "maxAmount": None}
+        return {"status": mandate.status, "maxAmount": mandate.maxAmount, "contactPhone": mandate.contactPhone}
+    finally:
+        db.close()
+
+
+@app.post("/api/user/recurring-payment/cancel")
+async def cancel_recurring_payment(request: Request, authorization: Optional[str] = Header(None)):
+    user = await get_current_user(authorization, request)
+    db = SessionLocal()
+    try:
+        mandate = db.query(PaymentMandate).filter(PaymentMandate.userId == user.user_id).first()
+        if not mandate or mandate.status != "active":
+            raise HTTPException(status_code=404, detail="No active auto-pay to cancel")
+
+        mandate.status = "cancelled"
+        mandate.updatedAt = datetime.now(timezone.utc)
+        db.commit()
+        return {"message": "Auto-pay cancelled"}
     finally:
         db.close()
 
