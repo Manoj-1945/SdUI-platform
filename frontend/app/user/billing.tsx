@@ -275,11 +275,14 @@ const styles = StyleSheet.create({
     fontSize: 18,
     color: colors.white,
   },
+<<<<<<< HEAD
   headerActions: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.md,
   },
+=======
+>>>>>>> a81f48d (billing upgrade)
   content: {
     flex: 1,
     paddingHorizontal: spacing.lg,

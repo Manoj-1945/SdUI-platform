@@ -34,6 +34,33 @@ app.add_middleware(
 )
 
 
+from collections import defaultdict
+
+_failed_login_attempts: dict = defaultdict(list)
+MAX_LOGIN_ATTEMPTS = 5
+LOGIN_LOCKOUT_WINDOW = timedelta(minutes=15)
+
+
+def check_login_rate_limit(email: str):
+    """Blocks further login attempts for an email after too many recent
+    failures, to prevent unlimited password brute-forcing. In-memory only
+    - resets on server restart and doesn't share state across multiple
+    server instances, which is fine for a single-instance deployment."""
+    now = datetime.now(timezone.utc)
+    recent = [t for t in _failed_login_attempts[email] if now - t < LOGIN_LOCKOUT_WINDOW]
+    _failed_login_attempts[email] = recent
+    if len(recent) >= MAX_LOGIN_ATTEMPTS:
+        raise HTTPException(status_code=429, detail="Too many failed login attempts. Please try again in 15 minutes.")
+
+
+def record_failed_login(email: str):
+    _failed_login_attempts[email].append(datetime.now(timezone.utc))
+
+
+def clear_failed_logins(email: str):
+    _failed_login_attempts.pop(email, None)
+
+
 class ConnectionManager:
     """Tracks live WebSocket connections per user so new sensor readings
     can be pushed instantly instead of the frontend having to poll."""
@@ -823,11 +850,15 @@ async def signup(user_data: UserSignup):
 
 @app.post("/api/auth/login")
 async def login(credentials: UserLogin):
+    email = str(credentials.email)
+    check_login_rate_limit(email)
     db = SessionLocal()
     try:
-        user = db.query(DBUser).filter(DBUser.email == str(credentials.email)).first()
+        user = db.query(DBUser).filter(DBUser.email == email).first()
         if not user or not verify_password(credentials.password, user.password or ""):
+            record_failed_login(email)
             raise HTTPException(status_code=401, detail="Invalid credentials")
+        clear_failed_logins(email)
 
         session_token = f"session_{uuid.uuid4().hex}"
         user.session_token = session_token
@@ -954,11 +985,15 @@ async def websocket_endpoint(websocket: WebSocket, user_id: str, token: str = Qu
 
 @app.post("/api/admin/login")
 async def admin_login(credentials: UserLogin):
+    email = str(credentials.email)
+    check_login_rate_limit(email)
     db = SessionLocal()
     try:
-        user = db.query(DBUser).filter(DBUser.email == str(credentials.email)).first()
+        user = db.query(DBUser).filter(DBUser.email == email).first()
         if not user or user.role != "admin" or not verify_password(credentials.password, user.password or ""):
+            record_failed_login(email)
             raise HTTPException(status_code=401, detail="Invalid admin credentials")
+        clear_failed_logins(email)
 
         session_token = f"session_{uuid.uuid4().hex}"
         user.session_token = session_token

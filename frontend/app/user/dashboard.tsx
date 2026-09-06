@@ -55,6 +55,7 @@ export default function UserDashboard() {
   const [refreshing, setRefreshing] = useState(false);
   const [loadError, setLoadError] = useState(false);
   const [lowBalanceNotified, setLowBalanceNotified] = useState(false);
+  const [smartTips, setSmartTips] = useState<any[]>([]);
 
   const fetchDashboard = async () => {
     try {
@@ -65,6 +66,12 @@ export default function UserDashboard() {
         insights = insightsRes.data;
       } catch (e) {
         // Non-critical - dashboard still works without the insights card
+      }
+      try {
+        const tipsRes = await api.get('/api/user/smart-tips');
+        setSmartTips(tipsRes.data.tips || []);
+      } catch (e) {
+        // Non-critical - dashboard still works without tips
       }
       setDashboardData({ ...response.data, usageInsights: insights });
       setLoadError(false);
@@ -283,6 +290,34 @@ export default function UserDashboard() {
               </View>
             ) : null}
           </View>
+        </View>
+      )}
+
+      {/* Smart Tips */}
+      {smartTips.length > 0 && (
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Smart tips</Text>
+          {smartTips.map((tip, index) => (
+            <View key={index} style={styles.tipCard}>
+              <Ionicons
+                name={
+                  tip.type === 'carbon_footprint'
+                    ? 'leaf-outline'
+                    : tip.type === 'peak_hour'
+                    ? 'time-outline'
+                    : tip.type === 'standby_load'
+                    ? 'flash-outline'
+                    : 'flame-outline'
+                }
+                size={22}
+                color={colors.current}
+              />
+              <View style={styles.tipTextContainer}>
+                <Text style={styles.tipTitle}>{tip.title}</Text>
+                <Text style={styles.tipMessage}>{tip.message}</Text>
+              </View>
+            </View>
+          ))}
         </View>
       )}
 
@@ -607,5 +642,29 @@ const styles = StyleSheet.create({
     color: colors.mist,
     marginTop: 4,
     textAlign: 'center',
+  },
+  tipCard: {
+    flexDirection: 'row',
+    backgroundColor: colors.circuit,
+    borderRadius: radii.md,
+    padding: spacing.md,
+    marginBottom: spacing.sm + 4,
+    alignItems: 'flex-start',
+    gap: spacing.sm + 4,
+  },
+  tipTextContainer: {
+    flex: 1,
+  },
+  tipTitle: {
+    fontFamily: fonts.display,
+    fontSize: 14,
+    color: colors.white,
+    marginBottom: 4,
+  },
+  tipMessage: {
+    fontFamily: fonts.body,
+    fontSize: 12,
+    color: colors.mist,
+    lineHeight: 17,
   },
 });
