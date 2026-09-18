@@ -1285,7 +1285,13 @@ async def pay_bill(payment: PaymentRequest, request: Request, authorization: Opt
             raise HTTPException(status_code=404, detail="Bill not found")
         if bill.status != "unpaid":
             raise HTTPException(status_code=400, detail="This bill is no longer payable")
-        if user.balance < payment.amount:
+
+        # Security: always charge the bill's real amount from the database.
+        # Trusting a client-supplied amount allowed a negative value to
+        # inflate the wallet balance while marking the bill paid.
+        charge_amount = bill.amount
+
+        if user.balance < charge_amount:
             raise HTTPException(status_code=400, detail="Insufficient balance")
 
         bill.status = "paid"
@@ -1293,13 +1299,13 @@ async def pay_bill(payment: PaymentRequest, request: Request, authorization: Opt
 
         db_user = db.query(DBUser).filter(DBUser.user_id == user.user_id).first()
         if db_user:
-            db_user.balance -= payment.amount
+            db_user.balance -= charge_amount
 
         payment_record = Payment(
             paymentId=f"pay_{uuid.uuid4().hex[:12]}",
             userId=user.user_id,
             billId=payment.billId,
-            amount=payment.amount,
+            amount=charge_amount,
             paymentDate=datetime.now(timezone.utc),
             method="wallet",
         )
@@ -1309,13 +1315,13 @@ async def pay_bill(payment: PaymentRequest, request: Request, authorization: Opt
             notifId=f"notif_{uuid.uuid4().hex[:12]}",
             userId=user.user_id,
             type="payment",
-            message=f"Payment of ₹{payment.amount} successful",
+            message=f"Payment of ₹{charge_amount} successful",
             data=None,
             isRead=False,
             createdAt=datetime.now(timezone.utc),
         )
         db.add(notification)
-        send_push_to_user(db, user.user_id, "Payment successful", f"Rs.{payment.amount} paid successfully.")
+        send_push_to_user(db, user.user_id, "Payment successful", f"Rs.{charge_amount} paid successfully.")
         db.commit()
         return {"message": "Payment successful", "newBalance": db_user.balance if db_user else user.balance}
     finally:
@@ -1553,6 +1559,79 @@ async def cancel_recurring_payment(request: Request, authorization: Optional[str
         mandate.updatedAt = datetime.now(timezone.utc)
         db.commit()
         return {"message": "Auto-pay cancelled"}
+    finally:
+        db.close()
+
+
+@app.get("/api/user/smart-tips")
+async def get_smart_tips(request: Request, authorization: Optional[str] = Header(None)):
+    user = await get_current_user(authorization, request)
+    db = SessionLocal()
+    try:
+        now = datetime.now(timezone.utc)
+        month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        readings = db.query(EnergyReading).filter(
+            EnergyReading.userId == user.user_id, EnergyReading.timestamp >= month_start
+        ).order_by(EnergyReading.timestamp.asc()).all()
+
+        tips = []
+        total_energy = sum(r.energy for r in readings)
+
+        # Carbon footprint, using India's commonly cited grid average
+        # emission factor of roughly 0.82 kg CO2 per kWh.
+        if total_energy > 0:
+            co2_kg = round(total_energy * 0.82, 1)
+            tips.append({
+                "type": "carbon_footprint",
+                "title": "Carbon footprint this month",
+                "message": f"Your usage of {total_energy:.1f} kWh is estimated at {co2_kg} kg of CO2, based on India's average grid emission factor.",
+            })
+
+        # Peak usage hour, computed from this user's own readings
+        if readings:
+            hourly_totals: dict = {}
+            hourly_counts: dict = {}
+            for r in readings:
+                hour = r.timestamp.hour
+                hourly_totals[hour] = hourly_totals.get(hour, 0) + r.power
+                hourly_counts[hour] = hourly_counts.get(hour, 0) + 1
+            hourly_avg = {h: hourly_totals[h] / hourly_counts[h] for h in hourly_totals}
+            peak_hour = max(hourly_avg, key=hourly_avg.get)
+            tips.append({
+                "type": "peak_hour",
+                "title": "Your peak usage hour",
+                "message": f"You draw the most power around {peak_hour}:00. Shifting flexible usage away from this hour can help if your utility offers time-of-day rates.",
+            })
+
+        # Standby load - the lowest reading approximates what is always drawing power
+        if readings:
+            baseline = min(r.power for r in readings)
+            if baseline > 50:
+                tips.append({
+                    "type": "standby_load",
+                    "title": "Possible standby power draw",
+                    "message": f"Your power never drops below about {baseline:.0f}W this month. This could mean devices left on standby - worth checking what stays plugged in.",
+                })
+
+        # Biggest consuming appliance as a share of tracked usage
+        appliances = db.query(Appliance).filter(Appliance.userId == user.user_id).all()
+        if appliances and total_energy > 0:
+            appliance_energy = {}
+            for appliance in appliances:
+                matching = [r for r in readings if appliance.minPower <= r.power <= appliance.maxPower]
+                appliance_energy[appliance.name] = sum(r.energy for r in matching)
+            if appliance_energy:
+                top_name = max(appliance_energy, key=appliance_energy.get)
+                top_energy = appliance_energy[top_name]
+                if top_energy > 0:
+                    pct = round((top_energy / total_energy) * 100, 1)
+                    tips.append({
+                        "type": "top_appliance",
+                        "title": "Your biggest consumer",
+                        "message": f"{top_name} accounts for roughly {pct}% of your tracked energy use this month.",
+                    })
+
+        return {"tips": tips}
     finally:
         db.close()
 
