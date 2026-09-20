@@ -31,3 +31,4 @@ websockets>=12.0
 fpdf2>=2.7.0
 python-barcode>=0.15.1
 Pillow>=10.0.0
+psycopg2-binary>=2.9.9

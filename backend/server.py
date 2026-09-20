@@ -5,6 +5,9 @@ from sqlalchemy.orm import declarative_base, sessionmaker
 from pydantic import BaseModel, EmailStr
 from typing import Optional
 from datetime import datetime, timezone, timedelta
+from zoneinfo import ZoneInfo
+
+IST = ZoneInfo("Asia/Kolkata")
 from dotenv import load_dotenv
 import json
 import os
@@ -14,6 +17,8 @@ import uuid
 import bcrypt
 import razorpay
 import requests
+import smtplib
+from email.mime.text import MIMEText
 from fpdf import FPDF
 from pywebpush import webpush, WebPushException
 from google.oauth2 import id_token
@@ -89,8 +94,21 @@ class ConnectionManager:
 
 manager = ConnectionManager()
 
-DATABASE_URL = "sqlite:///./smart_energy.db"
-engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
+# Render's disk is ephemeral - SQLite here gets wiped on every redeploy/restart.
+# Set DATABASE_URL to a real Postgres connection string in production (Render
+# provides one automatically when you attach a Postgres database to this
+# service). Falls back to local SQLite only when DATABASE_URL isn't set,
+# which is fine for local development but never for production.
+DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./smart_energy.db")
+if DATABASE_URL.startswith("postgres://"):
+    # Render (and some other providers) hand out "postgres://", but
+    # SQLAlchemy's modern driver requires "postgresql://"
+    DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
+
+if DATABASE_URL.startswith("sqlite"):
+    engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
+else:
+    engine = create_engine(DATABASE_URL, pool_pre_ping=True)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
@@ -198,6 +216,30 @@ class PushSubscription(Base):
     userId = Column(String, nullable=False, index=True)
     platform = Column(String, nullable=False)  # "web" or "native"
     token = Column(Text, nullable=False)  # Expo push token string, or JSON web push subscription
+    createdAt = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+
+class PasswordResetToken(Base):
+    __tablename__ = "password_reset_tokens"
+    id = Column(Integer, primary_key=True)
+    userId = Column(String, nullable=False, index=True)
+    token = Column(String, unique=True, nullable=False, index=True)
+    expiresAt = Column(DateTime, nullable=False)
+    used = Column(Boolean, default=False)
+    createdAt = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+
+class AuditLog(Base):
+    """Records sensitive admin actions - who did what to whose account.
+    Necessary given this app can remotely cut someone's real electricity
+    and change what they're billed."""
+    __tablename__ = "audit_logs"
+    id = Column(Integer, primary_key=True)
+    logId = Column(String, unique=True, nullable=False, index=True)
+    adminUserId = Column(String, nullable=False, index=True)
+    action = Column(String, nullable=False)
+    targetUserId = Column(String, nullable=True, index=True)
+    details = Column(Text, nullable=True)
     createdAt = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
 
@@ -552,6 +594,61 @@ def send_due_bill_reminders():
         db.close()
 
 
+def check_offline_devices():
+    """Runs periodically: flags any device that was active but has gone
+    silent, and notifies both the user and admins. Without this, someone
+    could simply unplug the ESP32 to stop energy from being tracked -
+    no readings means no bill, and nobody would otherwise know."""
+    db = SessionLocal()
+    try:
+        cutoff = datetime.now(timezone.utc) - DEVICE_OFFLINE_THRESHOLD
+        devices = db.query(Device).filter(Device.status == "active", Device.lastSeen.isnot(None)).all()
+        flagged = 0
+        for device in devices:
+            last_seen = device.lastSeen
+            if last_seen.tzinfo is None:
+                last_seen = last_seen.replace(tzinfo=timezone.utc)
+            if last_seen >= cutoff:
+                continue  # still reporting normally
+
+            already_notified = db.query(Notification).filter(
+                Notification.userId == device.userId,
+                Notification.type == "device_offline",
+                Notification.data == json.dumps({"deviceId": device.deviceId}),
+                Notification.createdAt >= datetime.now(timezone.utc) - timedelta(hours=6),
+            ).first()
+            if already_notified:
+                continue  # already alerted about this device recently
+
+            db.add(Notification(
+                notifId=f"notif_{uuid.uuid4().hex[:12]}",
+                userId=device.userId,
+                type="device_offline",
+                message=f"{device.deviceName} has stopped sending readings. Check its power/WiFi connection.",
+                data=json.dumps({"deviceId": device.deviceId}),
+                isRead=False,
+                createdAt=datetime.now(timezone.utc),
+            ))
+            send_push_to_user(db, device.userId, "Device offline", f"{device.deviceName} has stopped reporting.")
+
+            admins = db.query(DBUser).filter(DBUser.role == "admin").all()
+            for admin in admins:
+                db.add(Notification(
+                    notifId=f"notif_{uuid.uuid4().hex[:12]}",
+                    userId=admin.user_id,
+                    type="device_offline",
+                    message=f"Device {device.deviceName} (user {device.userId}) has gone offline.",
+                    data=json.dumps({"deviceId": device.deviceId}),
+                    isRead=False,
+                    createdAt=datetime.now(timezone.utc),
+                ))
+            flagged += 1
+        db.commit()
+        print(f"[devices] Offline check run: {flagged} device(s) newly flagged")
+    finally:
+        db.close()
+
+
 scheduler = AsyncIOScheduler()
 
 
@@ -571,6 +668,12 @@ async def start_billing_scheduler():
         send_due_bill_reminders,
         CronTrigger(hour=9, minute=0),
         id="due_bill_reminders",
+        replace_existing=True,
+    )
+    scheduler.add_job(
+        check_offline_devices,
+        CronTrigger(minute="*/15"),
+        id="offline_device_check",
         replace_existing=True,
     )
     scheduler.start()
@@ -763,7 +866,17 @@ def appliance_to_dict(appliance: Appliance) -> dict:
     }
 
 
+DEVICE_OFFLINE_THRESHOLD = timedelta(minutes=2)
+
+
 def device_to_dict(device: Device) -> dict:
+    is_online = False
+    if device.lastSeen:
+        last_seen = device.lastSeen
+        if last_seen.tzinfo is None:
+            last_seen = last_seen.replace(tzinfo=timezone.utc)
+        is_online = (datetime.now(timezone.utc) - last_seen) < DEVICE_OFFLINE_THRESHOLD
+
     return {
         "deviceId": device.deviceId,
         "deviceName": device.deviceName,
@@ -771,6 +884,7 @@ def device_to_dict(device: Device) -> dict:
         "registeredAt": device.registeredAt,
         "status": device.status,
         "lastSeen": device.lastSeen,
+        "isOnline": is_online,
     }
 
 
@@ -924,6 +1038,106 @@ async def logout(request: Request, response: Response, authorization: Optional[s
     response.delete_cookie("session_token")
     return {"message": "Logged out successfully"}
 
+
+SMTP_HOST = os.getenv("SMTP_HOST", "")
+SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
+SMTP_USER = os.getenv("SMTP_USER", "")
+SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "")
+SMTP_FROM = os.getenv("SMTP_FROM", SMTP_USER)
+FRONTEND_URL = os.getenv("FRONTEND_URL", "https://your-frontend.vercel.app")
+
+
+def send_email(to_email: str, subject: str, body: str) -> bool:
+    """Sends a plain-text email via SMTP. Returns False (and just logs)
+    if SMTP isn't configured yet, rather than crashing the request that
+    triggered it - configure SMTP_HOST/SMTP_USER/SMTP_PASSWORD env vars
+    on Render to actually enable delivery (e.g. using Gmail's SMTP with
+    an app password, or any transactional email provider's SMTP creds)."""
+    if not SMTP_HOST or not SMTP_USER or not SMTP_PASSWORD:
+        print(f"[email] SMTP not configured - would have sent to {to_email}: {subject}")
+        return False
+    try:
+        msg = MIMEText(body)
+        msg["Subject"] = subject
+        msg["From"] = SMTP_FROM
+        msg["To"] = to_email
+        with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=10) as server:
+            server.starttls()
+            server.login(SMTP_USER, SMTP_PASSWORD)
+            server.sendmail(SMTP_FROM, [to_email], msg.as_string())
+        return True
+    except Exception as exc:
+        print(f"[email] failed to send to {to_email}: {exc}")
+        return False
+
+
+class ForgotPasswordRequest(BaseModel):
+    email: EmailStr
+
+
+class ResetPasswordRequest(BaseModel):
+    token: str
+    newPassword: str
+
+
+@app.post("/api/auth/forgot-password")
+async def forgot_password(req: ForgotPasswordRequest):
+    db = SessionLocal()
+    try:
+        user = db.query(DBUser).filter(DBUser.email == str(req.email)).first()
+        # Always return the same response whether or not the email exists,
+        # so this endpoint can't be used to check which emails are registered.
+        if user:
+            token = uuid.uuid4().hex
+            db.add(PasswordResetToken(
+                userId=user.user_id,
+                token=token,
+                expiresAt=datetime.now(timezone.utc) + timedelta(hours=1),
+            ))
+            db.commit()
+
+            reset_link = f"{FRONTEND_URL}/auth/reset-password?token={token}"
+            send_email(
+                user.email,
+                "Reset your Smart Energy Monitor password",
+                f"Hi {user.name},\n\nClick this link to reset your password (expires in 1 hour):\n{reset_link}\n\nIf you didn't request this, you can ignore this email.",
+            )
+        return {"message": "If that email is registered, a reset link has been sent."}
+    finally:
+        db.close()
+
+
+@app.post("/api/auth/reset-password")
+async def reset_password(req: ResetPasswordRequest):
+    if len(req.newPassword) < 6:
+        raise HTTPException(status_code=400, detail="Password must be at least 6 characters")
+
+    db = SessionLocal()
+    try:
+        reset_token = db.query(PasswordResetToken).filter(PasswordResetToken.token == req.token).first()
+        if not reset_token or reset_token.used:
+            raise HTTPException(status_code=400, detail="Invalid or already-used reset link")
+
+        expires_at = reset_token.expiresAt
+        if expires_at.tzinfo is None:
+            expires_at = expires_at.replace(tzinfo=timezone.utc)
+        if expires_at < datetime.now(timezone.utc):
+            raise HTTPException(status_code=400, detail="This reset link has expired")
+
+        user = db.query(DBUser).filter(DBUser.user_id == reset_token.userId).first()
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+
+        user.password = hash_password(req.newPassword)
+        user.session_token = None  # invalidate any existing session for safety
+        user.session_expires_at = None
+        reset_token.used = True
+        db.commit()
+        return {"message": "Password reset successfully. Please log in with your new password."}
+    finally:
+        db.close()
+
+
 @app.get("/api/auth/me")
 async def get_current_user_profile(request: Request, authorization: Optional[str] = Header(None)):
     user = await get_current_user(authorization, request)
@@ -1002,6 +1216,17 @@ async def admin_login(credentials: UserLogin):
         return {"user": {"user_id": user.user_id, "email": user.email, "name": user.name, "role": user.role}, "session_token": session_token}
     finally:
         db.close()
+
+
+def log_admin_action(db, admin_user_id: str, action: str, target_user_id: str = None, details: str = None):
+    db.add(AuditLog(
+        logId=f"audit_{uuid.uuid4().hex[:12]}",
+        adminUserId=admin_user_id,
+        action=action,
+        targetUserId=target_user_id,
+        details=details,
+        createdAt=datetime.now(timezone.utc),
+    ))
 
 
 def compute_power_status(db, user_id: str) -> bool:
@@ -1587,12 +1812,15 @@ async def get_smart_tips(request: Request, authorization: Optional[str] = Header
                 "message": f"Your usage of {total_energy:.1f} kWh is estimated at {co2_kg} kg of CO2, based on India's average grid emission factor.",
             })
 
-        # Peak usage hour, computed from this user's own readings
+        # Peak usage hour, computed from this user's own readings.
+        # Timestamps are stored in UTC, but the hour shown needs to be
+        # actual India local time, not the raw UTC hour.
         if readings:
             hourly_totals: dict = {}
             hourly_counts: dict = {}
             for r in readings:
-                hour = r.timestamp.hour
+                ts = r.timestamp if r.timestamp.tzinfo else r.timestamp.replace(tzinfo=timezone.utc)
+                hour = ts.astimezone(IST).hour
                 hourly_totals[hour] = hourly_totals.get(hour, 0) + r.power
                 hourly_counts[hour] = hourly_counts.get(hour, 0) + 1
             hourly_avg = {h: hourly_totals[h] / hourly_counts[h] for h in hourly_totals}
@@ -1600,7 +1828,7 @@ async def get_smart_tips(request: Request, authorization: Optional[str] = Header
             tips.append({
                 "type": "peak_hour",
                 "title": "Your peak usage hour",
-                "message": f"You draw the most power around {peak_hour}:00. Shifting flexible usage away from this hour can help if your utility offers time-of-day rates.",
+                "message": f"You draw the most power around {peak_hour}:00 IST. Shifting flexible usage away from this hour can help if your utility offers time-of-day rates.",
             })
 
         # Standby load - the lowest reading approximates what is always drawing power
@@ -1765,6 +1993,14 @@ async def appliance_cost_breakdown(request: Request, authorization: Optional[str
         db.close()
 
 
+def fmt_ist_date(dt) -> str:
+    if not dt:
+        return "-"
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(IST).strftime("%d/%m/%Y")
+
+
 def generate_escom_style_receipt(bill, breakdown, profile, user) -> bytes:
     """Renders a bill receipt matching a real Karnataka ESCOM bill's
     layout: Kannada header, consumer/connection details, the itemized
@@ -1828,8 +2064,8 @@ def generate_escom_style_receipt(bill, breakdown, profile, user) -> bytes:
 
     # --- Bill details ---
     kv_row("Bill Number", bill.billId)
-    kv_row("Bill Date", bill.generatedAt.strftime("%d/%m/%Y") if bill.generatedAt else "-")
-    kv_row("Due Date", bill.dueDate.strftime("%d/%m/%Y") if bill.dueDate else "-")
+    kv_row("Bill Date", fmt_ist_date(bill.generatedAt))
+    kv_row("Due Date", fmt_ist_date(bill.dueDate))
     dotted_rule()
 
     # --- Usage details ---
@@ -1885,7 +2121,7 @@ def generate_escom_style_receipt(bill, breakdown, profile, user) -> bytes:
     dotted_rule()
 
     line(f"ಪಾವತಿಯ ಮೊತ್ತ / AMOUNT PAYABLE: Rs.{bill.amount:,.2f}", size=9, bold=True, gap=2)
-    line(f"ಪಾವತಿ ಕೊನೆಯ ದಿನಾಂಕ / DUE DATE: {bill.dueDate.strftime('%d/%m/%Y') if bill.dueDate else '-'}", size=7.5, gap=2)
+    line(f"ಪಾವತಿ ಕೊನೆಯ ದಿನಾಂಕ / DUE DATE: {fmt_ist_date(bill.dueDate)}", size=7.5, gap=2)
     line(f"STATUS: {bill.status.upper()}", size=8, bold=True, gap=2)
 
     # --- Barcode ---
@@ -2253,6 +2489,7 @@ async def update_payment_status(user_id: str, update: UpdatePaymentStatus, reque
         bill.status = update.status
         if update.status == "paid" and not bill.paidAt:
             bill.paidAt = datetime.now(timezone.utc)
+        log_admin_action(db, admin.user_id, "payment_status_update", target_user_id=user_id, details=f"bill {update.billId} set to {update.status}")
         db.commit()
         return {"message": "Payment status updated"}
     finally:
@@ -2283,10 +2520,37 @@ async def control_power(user_id: str, control: PowerControlRequest, request: Req
     try:
         control_record = PowerControl(controlId=f"ctrl_{uuid.uuid4().hex[:12]}", userId=user_id, status=control.status, controlledBy=admin.user_id, timestamp=datetime.now(timezone.utc))
         db.add(control_record)
+        log_admin_action(db, admin.user_id, "power_control", target_user_id=user_id, details=f"set power {control.status}")
         notification = Notification(notifId=f"notif_{uuid.uuid4().hex[:12]}", userId=user_id, type="power_control", message=f"Power has been turned {control.status} by admin", data=None, isRead=False, createdAt=datetime.now(timezone.utc))
         db.add(notification)
         db.commit()
         return {"message": f"Power turned {control.status}"}
+    finally:
+        db.close()
+
+
+@app.get("/api/admin/audit-log")
+async def get_audit_log(request: Request, authorization: Optional[str] = Header(None), limit: int = 100):
+    admin = await get_current_user(authorization, request)
+    if admin.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+
+    db = SessionLocal()
+    try:
+        logs = db.query(AuditLog).order_by(AuditLog.createdAt.desc()).limit(min(limit, 500)).all()
+        return {
+            "logs": [
+                {
+                    "logId": l.logId,
+                    "adminUserId": l.adminUserId,
+                    "action": l.action,
+                    "targetUserId": l.targetUserId,
+                    "details": l.details,
+                    "createdAt": l.createdAt,
+                }
+                for l in logs
+            ]
+        }
     finally:
         db.close()
 
@@ -2312,13 +2576,17 @@ async def update_tariff_rate(user_id: str, new_rate: float, request: Request, au
     admin = await get_current_user(authorization, request)
     if admin.role != "admin":
         raise HTTPException(status_code=403, detail="Admin access required")
+    if new_rate <= 0:
+        raise HTTPException(status_code=400, detail="Tariff rate must be positive")
 
     db = SessionLocal()
     try:
         user = db.query(DBUser).filter(DBUser.user_id == user_id).first()
         if not user:
             raise HTTPException(status_code=404, detail="User not found")
+        old_rate = user.tariffRate
         user.tariffRate = new_rate
+        log_admin_action(db, admin.user_id, "tariff_update", target_user_id=user_id, details=f"rate {old_rate} -> {new_rate}")
         notification = Notification(notifId=f"notif_{uuid.uuid4().hex[:12]}", userId=user_id, type="tariff_update", message=f"Your tariff rate has been updated to ₹{new_rate}/kWh", data=None, isRead=False, createdAt=datetime.now(timezone.utc))
         db.add(notification)
         db.commit()
@@ -2332,12 +2600,15 @@ async def update_global_tariff(new_rate: float, request: Request, authorization:
     admin = await get_current_user(authorization, request)
     if admin.role != "admin":
         raise HTTPException(status_code=403, detail="Admin access required")
+    if new_rate <= 0:
+        raise HTTPException(status_code=400, detail="Tariff rate must be positive")
 
     db = SessionLocal()
     try:
         users = db.query(DBUser).filter(DBUser.role == "user").all()
         for user in users:
             user.tariffRate = new_rate
+        log_admin_action(db, admin.user_id, "global_tariff_update", details=f"rate set to {new_rate} for {len(users)} users")
         db.commit()
         return {"message": "Global tariff rate updated successfully", "newRate": new_rate, "usersAffected": len(users)}
     finally:
