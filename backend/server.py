@@ -1197,6 +1197,40 @@ async def websocket_endpoint(websocket: WebSocket, user_id: str, token: str = Qu
         manager.disconnect(user_id, websocket)
 
 
+ADMIN_BOOTSTRAP_SECRET = os.getenv("ADMIN_BOOTSTRAP_SECRET", "")
+
+
+class BootstrapAdminRequest(BaseModel):
+    email: EmailStr
+    secret: str
+
+
+@app.post("/api/admin/bootstrap")
+async def bootstrap_admin(req: BootstrapAdminRequest):
+    """One-time way to promote an existing account to admin, without
+    needing direct database access. Requires ADMIN_BOOTSTRAP_SECRET to be
+    set as an env var on Render - if it's not set, this endpoint refuses
+    to do anything, so it's inert until you deliberately turn it on."""
+    if not ADMIN_BOOTSTRAP_SECRET:
+        raise HTTPException(status_code=503, detail="Admin bootstrap is not enabled on this server")
+    if req.secret != ADMIN_BOOTSTRAP_SECRET:
+        raise HTTPException(status_code=403, detail="Invalid secret")
+
+    db = SessionLocal()
+    try:
+        user = db.query(DBUser).filter(DBUser.email == str(req.email)).first()
+        if not user:
+            raise HTTPException(status_code=404, detail="No account with that email - sign up first")
+        if user.role == "admin":
+            return {"message": f"{req.email} is already an admin"}
+
+        user.role = "admin"
+        db.commit()
+        return {"message": f"{req.email} is now an admin. You can log in via the Admin Login screen."}
+    finally:
+        db.close()
+
+
 @app.post("/api/admin/login")
 async def admin_login(credentials: UserLogin):
     email = str(credentials.email)
