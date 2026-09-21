@@ -39,7 +39,7 @@
       "typedRoutes": true
     },
     "extra": {
-      "EXPO_PUBLIC_BACKEND_URL": "http://127.0.0.1:8001"
+      "EXPO_PUBLIC_BACKEND_URL": "https://sdui-platform.onrender.com"
     }
   }
 }
