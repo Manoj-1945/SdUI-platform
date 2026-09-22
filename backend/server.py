@@ -14,6 +14,7 @@ import os
 import csv
 import io
 import uuid
+import hmac
 import bcrypt
 import razorpay
 import requests
@@ -28,14 +29,24 @@ from apscheduler.triggers.cron import CronTrigger
 
 load_dotenv()
 
+CORS_ALLOWED_ORIGINS = [
+    origin.strip()
+    for origin in os.getenv(
+        "CORS_ALLOWED_ORIGINS",
+        "http://localhost:8081,http://127.0.0.1:8081,http://localhost:3000,http://127.0.0.1:3000",
+    ).split(",")
+    if origin.strip()
+]
+
 app = FastAPI()
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=CORS_ALLOWED_ORIGINS,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "X-Device-Key", "X-Requested-With"],
+    expose_headers=["*"],
 )
 
 
@@ -652,10 +663,28 @@ def check_offline_devices():
 
 
 scheduler = AsyncIOScheduler()
+DEVICE_API_KEY = os.getenv("DEVICE_API_KEY", "").strip()
+
+
+def require_device_api_key(request: Request):
+    if not DEVICE_API_KEY:
+        raise HTTPException(status_code=503, detail="Device API key is not configured")
+
+    provided_key = request.headers.get("X-Device-Key") or request.query_params.get("deviceKey")
+    if not provided_key or not hmac.compare_digest(provided_key, DEVICE_API_KEY):
+        raise HTTPException(status_code=401, detail="Invalid or missing device API key")
 
 
 @app.on_event("startup")
 async def start_billing_scheduler():
+    global scheduler
+    if scheduler.running:
+        return
+
+    loop = getattr(scheduler, "_eventloop", None)
+    if loop is not None and loop.is_closed():
+        scheduler = AsyncIOScheduler()
+
     # Fires on the 1st of every month at 00:00 UTC. Render's free tier
     # sleeps when idle, so this won't fire reliably unless something
     # keeps the service awake (see /api/admin/generate-bills as a manual
@@ -679,6 +708,12 @@ async def start_billing_scheduler():
         replace_existing=True,
     )
     scheduler.start()
+
+
+@app.on_event("shutdown")
+async def shutdown_billing_scheduler():
+    if scheduler.running:
+        scheduler.shutdown(wait=False)
 
 
 RAZORPAY_KEY_ID = os.getenv("RAZORPAY_KEY_ID", "rzp_test_xxxxxxxxxx")
@@ -1175,11 +1210,17 @@ async def register_push_token(req: RegisterPushRequest, request: Request, author
 
 @app.websocket("/ws/{user_id}")
 async def websocket_endpoint(websocket: WebSocket, user_id: str, token: str = Query(None)):
-    # Browsers can't set custom headers on a WebSocket handshake, so the
-    # session token is passed as a query param instead of Authorization.
+    # Browsers cannot attach custom headers on a websocket handshake, so the
+    # session token is passed as a query param. We still validate it strictly
+    # against the authenticated user and reject any mismatch.
+    auth_token = token or websocket.query_params.get("token")
+    auth_header = websocket.headers.get("authorization", "")
+    if auth_header.lower().startswith("bearer "):
+        auth_token = auth_header.split(" ", 1)[1]
+
     db = SessionLocal()
     try:
-        user = db.query(DBUser).filter(DBUser.session_token == token).first() if token else None
+        user = db.query(DBUser).filter(DBUser.session_token == auth_token).first() if auth_token else None
         if not user or user.user_id != user_id:
             await websocket.close(code=4001)
             return
@@ -1189,8 +1230,6 @@ async def websocket_endpoint(websocket: WebSocket, user_id: str, token: str = Qu
     await manager.connect(user_id, websocket)
     try:
         while True:
-            # We don't expect messages from the client, but awaiting
-            # receive is how FastAPI detects the connection closing.
             await websocket.receive_text()
     except WebSocketDisconnect:
         manager.disconnect(user_id, websocket)
@@ -2126,12 +2165,10 @@ async def download_bill_receipt(bill_id: str, request: Request, authorization: O
 
 
 @app.get("/api/device/power-status")
-async def device_power_status(userId: str, deviceId: str):
-    """Unauthenticated on purpose, matching /api/iot/data's pattern -
-    a physical device can't easily hold a login session. Only requires
-    knowing a real, registered userId+deviceId pair, same trust model as
-    submitting readings. The ESP32 polls this to decide whether to keep
-    its relay/contactor closed (power ON) or open it (power OFF)."""
+async def device_power_status(userId: str, deviceId: str, request: Request):
+    """Requires a shared device secret so a physical meter cannot be spoofed.
+    The ESP32 must pass the configured X-Device-Key header or ?deviceKey= value."""
+    require_device_api_key(request)
     db = SessionLocal()
     try:
         user = db.query(DBUser).filter(DBUser.user_id == userId).first()
@@ -2149,7 +2186,8 @@ async def device_power_status(userId: str, deviceId: str):
 
 
 @app.post("/api/iot/data")
-async def receive_iot_data(iot_data: IoTData):
+async def receive_iot_data(iot_data: IoTData, request: Request):
+    require_device_api_key(request)
     db = SessionLocal()
     try:
         user = db.query(DBUser).filter(DBUser.user_id == iot_data.userId).first()
@@ -2369,6 +2407,29 @@ async def get_user_consumption(user_id: str, request: Request, authorization: Op
         thirty_days_ago = datetime.now(timezone.utc) - timedelta(days=30)
         readings = db.query(EnergyReading).filter(EnergyReading.userId == user_id, EnergyReading.timestamp >= thirty_days_ago).order_by(EnergyReading.timestamp.desc()).all()
         return {"readings": [reading_to_dict(item) for item in readings]}
+    finally:
+        db.close()
+
+
+@app.get("/api/admin/user/{user_id}/overview")
+async def get_user_overview(user_id: str, request: Request, authorization: Optional[str] = Header(None)):
+    admin = await get_current_user(authorization, request)
+    if admin.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+
+    db = SessionLocal()
+    try:
+        target_user = db.query(DBUser).filter(DBUser.user_id == user_id, DBUser.role == "user").first()
+        if not target_user:
+            raise HTTPException(status_code=404, detail="User not found")
+
+        devices = db.query(Device).filter(Device.userId == user_id).all()
+        bills = db.query(Bill).filter(Bill.userId == user_id).order_by(Bill.generatedAt.desc()).all()
+        return {
+            "devices": [device_to_dict(device) for device in devices],
+            "bills": [bill_to_dict(bill) for bill in bills],
+            "unpaidTotal": round(sum(bill.amount for bill in bills if bill.status == "unpaid"), 2),
+        }
     finally:
         db.close()
 

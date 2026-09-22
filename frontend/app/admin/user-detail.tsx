@@ -22,6 +22,9 @@ export default function UserDetail() {
   const { userId } = useLocalSearchParams();
   const [user, setUser] = useState<any>(null);
   const [readings, setReadings] = useState<any[]>([]);
+  const [devices, setDevices] = useState<any[]>([]);
+  const [bills, setBills] = useState<any[]>([]);
+  const [unpaidTotal, setUnpaidTotal] = useState(0);
   const [powerOn, setPowerOn] = useState(true);
   const [loading, setLoading] = useState(true);
 
@@ -31,15 +34,19 @@ export default function UserDetail() {
 
   const fetchUserData = async () => {
     try {
-      const [usersRes, consumptionRes, powerRes] = await Promise.all([
+      const [usersRes, consumptionRes, powerRes, overviewRes] = await Promise.all([
         api.get('/api/admin/users'),
         api.get(`/api/admin/user/${userId}/consumption`),
         api.get(`/api/admin/user/${userId}/power-status`),
+        api.get(`/api/admin/user/${userId}/overview`),
       ]);
       const foundUser = usersRes.data.users.find((u: any) => u.user_id === userId);
       setUser(foundUser);
       setReadings(consumptionRes.data.readings);
       setPowerOn(powerRes.data.powerStatus === 'ON');
+      setDevices(overviewRes.data.devices);
+      setBills(overviewRes.data.bills);
+      setUnpaidTotal(overviewRes.data.unpaidTotal);
     } catch (error: any) {
       Alert.alert('Error', error.response?.data?.detail || 'Failed to load user data');
     } finally {
@@ -121,6 +128,64 @@ export default function UserDetail() {
             <Text style={styles.userStatValue}>₹{user.tariffRate}/kWh</Text>
           </View>
         </View>
+      </View>
+
+      {/* Connection and billing overview */}
+      <View style={styles.section}>
+        <Text style={styles.sectionTitle}>Connection & Billing</Text>
+        <View style={styles.overviewCard}>
+          <View style={styles.overviewHeader}>
+            <Text style={styles.overviewLabel}>Amount currently due</Text>
+            <Text style={styles.amountDue}>₹{unpaidTotal.toFixed(2)}</Text>
+          </View>
+          {devices.length === 0 ? (
+            <Text style={styles.emptyText}>No device registered</Text>
+          ) : (
+            devices.map((device) => (
+              <View key={device.deviceId} style={styles.deviceRow}>
+                <Ionicons
+                  name="hardware-chip"
+                  size={22}
+                  color={device.isOnline ? colors.success : colors.signal}
+                />
+                <View style={styles.deviceInfo}>
+                  <Text style={styles.deviceName}>{device.deviceName}</Text>
+                  <Text style={styles.deviceMeta}>{device.deviceId}</Text>
+                  <Text style={styles.deviceMeta}>
+                    {device.lastSeen
+                      ? `Last seen ${new Date(device.lastSeen).toLocaleString()}`
+                      : 'No readings received yet'}
+                  </Text>
+                </View>
+                <Text style={[styles.connectionStatus, { color: device.isOnline ? colors.success : colors.signal }]}>
+                  {device.isOnline ? 'ONLINE' : 'OFFLINE'}
+                </Text>
+              </View>
+            ))
+          )}
+        </View>
+
+        <Text style={styles.subsectionTitle}>Bills</Text>
+        {bills.length === 0 ? (
+          <Text style={styles.emptyText}>No bills generated</Text>
+        ) : (
+          bills.slice(0, 5).map((bill) => (
+            <View key={bill.billId} style={styles.billRow}>
+              <View>
+                <Text style={styles.billId}>{bill.billId}</Text>
+                <Text style={styles.deviceMeta}>
+                  Due {bill.dueDate ? new Date(bill.dueDate).toLocaleDateString() : '-'}
+                </Text>
+              </View>
+              <View style={styles.billAmountBlock}>
+                <Text style={styles.billAmount}>₹{bill.amount.toFixed(2)}</Text>
+                <Text style={[styles.billStatus, { color: bill.status === 'paid' ? colors.success : colors.signal }]}>
+                  {bill.status.toUpperCase()}
+                </Text>
+              </View>
+            </View>
+          ))
+        )}
       </View>
 
       {/* Power Control */}
@@ -274,6 +339,93 @@ const styles = StyleSheet.create({
     padding: spacing.lg,
     margin: spacing.lg,
     marginTop: 0,
+  },
+  overviewCard: {
+    backgroundColor: colors.circuit,
+    borderRadius: radii.md,
+    padding: spacing.md,
+    marginBottom: spacing.lg,
+  },
+  overviewHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingBottom: spacing.md,
+    marginBottom: spacing.md,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.circuitLight,
+  },
+  overviewLabel: {
+    fontFamily: fonts.mono,
+    color: colors.mist,
+    fontSize: 11,
+  },
+  amountDue: {
+    fontFamily: fonts.displayBold,
+    color: colors.signal,
+    fontSize: 20,
+  },
+  deviceRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: spacing.sm,
+  },
+  deviceInfo: {
+    flex: 1,
+    marginLeft: spacing.sm,
+  },
+  deviceName: {
+    fontFamily: fonts.display,
+    color: colors.white,
+    fontSize: 14,
+  },
+  deviceMeta: {
+    fontFamily: fonts.mono,
+    color: colors.mist,
+    fontSize: 10,
+    marginTop: 3,
+  },
+  connectionStatus: {
+    fontFamily: fonts.mono,
+    fontSize: 10,
+  },
+  subsectionTitle: {
+    fontFamily: fonts.display,
+    color: colors.white,
+    fontSize: 15,
+    marginBottom: spacing.sm,
+  },
+  billRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    backgroundColor: colors.circuit,
+    borderRadius: radii.md,
+    padding: spacing.md,
+    marginBottom: spacing.sm,
+  },
+  billId: {
+    fontFamily: fonts.mono,
+    color: colors.white,
+    fontSize: 11,
+  },
+  billAmountBlock: {
+    alignItems: 'flex-end',
+  },
+  billAmount: {
+    fontFamily: fonts.display,
+    color: colors.white,
+    fontSize: 15,
+  },
+  billStatus: {
+    fontFamily: fonts.mono,
+    fontSize: 10,
+    marginTop: 3,
+  },
+  emptyText: {
+    fontFamily: fonts.body,
+    color: colors.mist,
+    fontSize: 12,
   },
   controlHeader: {
     flexDirection: 'row',

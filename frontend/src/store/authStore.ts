@@ -103,12 +103,10 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
   logout: async () => {
     const token = get().sessionToken;
-    set({ user: null, sessionToken: null, isLoading: false });
-    await AsyncStorage.removeItem('session_token');
 
-    if (token) {
-      try {
-        void api.post(
+    try {
+      if (token) {
+        await api.post(
           '/api/auth/logout',
           {},
           {
@@ -116,12 +114,13 @@ export const useAuthStore = create<AuthState>((set, get) => ({
               Authorization: `Bearer ${token}`,
             },
           }
-        ).catch((error) => {
-          console.error('Logout error:', error);
-        });
-      } catch (error) {
-        console.error('Logout error:', error);
+        );
       }
+    } catch (error) {
+      console.error('Logout error:', error);
+    } finally {
+      set({ user: null, sessionToken: null, isLoading: false });
+      await AsyncStorage.removeItem('session_token');
     }
   },
 

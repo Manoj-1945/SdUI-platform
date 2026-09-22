@@ -1,8 +1,24 @@
 """
 Backend API Testing for Smart Energy Monitoring System
 """
+import os
+import sys
+from pathlib import Path
+
 import requests
 import json
+from fastapi.testclient import TestClient
+
+ROOT = Path(__file__).resolve().parent.parent
+BACKEND = Path(__file__).resolve().parent
+if str(BACKEND) not in sys.path:
+    sys.path.insert(0, str(BACKEND))
+
+os.environ.setdefault("DATABASE_URL", "sqlite:///./test_security.db")
+os.environ.setdefault("DEVICE_API_KEY", "test-device-secret")
+
+from sqlalchemy import text
+from server import app, SessionLocal, DBUser, Device
 
 BASE_URL = "https://iot-meter-track.preview.emergentagent.com/api"
 
@@ -294,6 +310,89 @@ def test_iot_data(user_id):
     except Exception as e:
         print(f"❌ Error: {e}")
         return False
+
+
+def _reset_security_tables():
+    db = SessionLocal()
+    try:
+        db.execute(text("DELETE FROM devices"))
+        db.execute(text("DELETE FROM users"))
+        db.commit()
+    finally:
+        db.close()
+
+
+def test_logout_invalidates_session_token():
+    _reset_security_tables()
+
+    db = SessionLocal()
+    try:
+        user = DBUser(
+            user_id="user_logout_test",
+            email="logout@test.com",
+            name="Logout User",
+            role="user",
+            password="hashed",
+            session_token="session_logout_123",
+        )
+        db.add(user)
+        db.commit()
+    finally:
+        db.close()
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/auth/logout",
+            headers={"Authorization": "Bearer session_logout_123"},
+        )
+        assert response.status_code == 200, response.text
+
+    db = SessionLocal()
+    try:
+        saved = db.query(DBUser).filter(DBUser.user_id == "user_logout_test").one()
+        assert saved.session_token is None
+    finally:
+        db.close()
+
+
+def test_iot_data_requires_device_key():
+    _reset_security_tables()
+
+    db = SessionLocal()
+    try:
+        user = DBUser(
+            user_id="iot_user_1",
+            email="iot@test.com",
+            name="IoT User",
+            role="user",
+            password="hashed",
+        )
+        db.add(user)
+        db.add(
+            Device(
+                deviceId="device_abc",
+                deviceName="Test Meter",
+                userId="iot_user_1",
+                status="active",
+            )
+        )
+        db.commit()
+    finally:
+        db.close()
+
+    with TestClient(app) as client:
+        payload = {
+            "userId": "iot_user_1",
+            "deviceId": "device_abc",
+            "voltage": 230,
+            "current": 2.5,
+            "power": 575,
+            "energy": 4.2,
+            "timestamp": "2024-01-01T00:00:00Z",
+        }
+        response = client.post("/api/iot/data", json=payload)
+        assert response.status_code == 401, response.text
+
 
 def main():
     """Run all tests"""
