@@ -17,7 +17,6 @@ import { colors, fonts, radii, spacing } from '../../src/theme/tokens';
 export default function AdminSettings() {
   const router = useRouter();
   const [tariffRate, setTariffRate] = useState('8.0');
-  const [lowBalanceUsers, setLowBalanceUsers] = useState<any[]>([]);
   const [unpaidUsers, setUnpaidUsers] = useState<any[]>([]);
   const [highConsumptionUsers, setHighConsumptionUsers] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -32,7 +31,6 @@ export default function AdminSettings() {
   const fetchProblematicUsers = async () => {
     try {
       const response = await api.get('/api/admin/users/problematic');
-      setLowBalanceUsers(response.data.lowBalanceUsers);
       setUnpaidUsers(response.data.unpaidBillUsers);
     } catch (error: any) {
       Alert.alert('Error', error.response?.data?.detail || 'Failed to load data');
@@ -143,35 +141,6 @@ export default function AdminSettings() {
               <Text style={styles.updateButtonText}>Update All Users</Text>
             </TouchableOpacity>
           </View>
-        </View>
-
-        {/* Low Balance Users */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>
-            ⚠️ Low Balance Users ({lowBalanceUsers.length})
-          </Text>
-          {lowBalanceUsers.map((user, index) => (
-            <View key={index} style={styles.userCard}>
-              <View style={styles.userInfo}>
-                <Text style={styles.userName}>{user.name}</Text>
-                <Text style={styles.userEmail}>{user.email}</Text>
-              </View>
-              <View style={styles.userActions}>
-                <Text style={styles.balanceText}>
-                  ₹{user.balance?.toFixed(2)}
-                </Text>
-                <TouchableOpacity
-                  style={styles.iconButton}
-                  onPress={() => handleUpdateUserTariff(user.user_id, user.tariffRate)}
-                >
-                  <Ionicons name="create" size={20} color={colors.current} />
-                </TouchableOpacity>
-              </View>
-            </View>
-          ))}
-          {lowBalanceUsers.length === 0 && (
-            <Text style={styles.emptyText}>No users with low balance</Text>
-          )}
         </View>
 
         {/* Unpaid Bills Users */}
@@ -384,11 +353,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.sm + 4,
-  },
-  balanceText: {
-    fontFamily: fonts.display,
-    fontSize: 15,
-    color: colors.copper,
   },
   iconButton: {
     padding: spacing.sm,

@@ -142,10 +142,7 @@ export default function AdminDashboard() {
               <Text style={styles.userName}>{user.name}</Text>
               <Text style={styles.userEmail}>{user.email}</Text>
             </View>
-            <View style={styles.userStats}>
-              <Text style={styles.userBalance}>₹{user.balance?.toFixed(2)}</Text>
-              <Ionicons name="chevron-forward" size={20} color={colors.mist} />
-            </View>
+            <Ionicons name="chevron-forward" size={20} color={colors.mist} />
           </TouchableOpacity>
         ))}
       </View>
@@ -279,11 +276,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.sm,
-  },
-  userBalance: {
-    fontFamily: fonts.display,
-    fontSize: 14,
-    color: colors.success,
   },
   loadingText: {
     fontFamily: fonts.body,

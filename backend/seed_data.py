@@ -30,7 +30,6 @@ class UserORM(Base):
     name          = Column(String, nullable=False)
     role          = Column(String, default="user")
     picture       = Column(String, nullable=True)
-    balance       = Column(Float, default=1000.0)
     tariffRate    = Column(Float, default=8.0)
     session_token = Column(String, nullable=True, index=True)
     created_at    = Column(DateTime, default=lambda: datetime.now(timezone.utc))
@@ -130,7 +129,6 @@ def seed_database():
             name       = "Admin User",
             role       = "admin",
             picture    = None,
-            balance    = 0,
             tariffRate = 8.0,
             created_at = datetime.now(timezone.utc),
         )
@@ -152,7 +150,6 @@ def seed_database():
                 name       = f"Test User {i}",
                 role       = "user",
                 picture    = None,
-                balance    = random.uniform(500, 2000),
                 tariffRate = 8.0,
                 created_at = datetime.now(timezone.utc) - timedelta(days=random.randint(10, 30)),
             )

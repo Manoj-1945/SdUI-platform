@@ -13,7 +13,7 @@ import { useRouter } from 'expo-router';
 import { useAuthStore } from '../../src/store/authStore';
 import { Ionicons } from '@expo/vector-icons';
 import api from '../../src/utils/api';
-import { registerWebPush, scheduleLowBalanceNotification } from '../../src/utils/pushNotifications';
+import { registerWebPush } from '../../src/utils/pushNotifications';
 import { useRealtimeReading } from '../../src/utils/useRealtimeReading';
 import { colors, fonts, radii, spacing } from '../../src/theme/tokens';
 import PowerGauge from '../../src/components/PowerGauge';
@@ -35,7 +35,6 @@ interface DashboardData {
     dueDate: string | null;
   };
   powerStatus: string;
-  balance: number;
   usageInsights?: {
     vsLastMonth: number;
     vsRollingAvg: number;
@@ -43,7 +42,6 @@ interface DashboardData {
         name: string;
         usage: number;
     } | null;
-    isAutoRechargeEnabled: boolean;
   }
 }
 
@@ -54,7 +52,6 @@ export default function UserDashboard() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [loadError, setLoadError] = useState(false);
-  const [lowBalanceNotified, setLowBalanceNotified] = useState(false);
   const [smartTips, setSmartTips] = useState<any[]>([]);
 
   const fetchDashboard = async () => {
@@ -90,17 +87,6 @@ export default function UserDashboard() {
     const interval = setInterval(fetchDashboard, 30000);
     return () => clearInterval(interval);
   }, []);
-
-  useEffect(() => {
-    if (!dashboardData) return;
-
-    if (dashboardData.balance < 100 && !lowBalanceNotified) {
-      scheduleLowBalanceNotification();
-      setLowBalanceNotified(true);
-    } else if (dashboardData.balance >= 100 && lowBalanceNotified) {
-      setLowBalanceNotified(false);
-    }
-  }, [dashboardData, lowBalanceNotified]);
 
   useRealtimeReading(user?.user_id, (reading) => {
     setDashboardData((prev) => (prev ? { ...prev, currentReading: reading } : prev));
@@ -174,22 +160,6 @@ export default function UserDashboard() {
         </View>
       </View>
 
-      {/* Low Balance Warning */}
-      {dashboardData?.balance < 100 && (
-        <TouchableOpacity
-          style={styles.lowBalanceCard}
-          onPress={() => router.push('/user/billing')}
-        >
-          <Ionicons name="warning" size={26} color={colors.void} />
-          <View style={styles.lowBalanceInfo}>
-            <Text style={styles.lowBalanceTitle}>Low balance</Text>
-            <Text style={styles.lowBalanceText}>
-              Recharge soon to avoid service disruption.
-            </Text>
-          </View>
-        </TouchableOpacity>
-      )}
-
       {/* Power Status Card */}
       <View style={[styles.powerCard, powerOn ? styles.powerOnBorder : styles.powerOffBorder]}>
         <View style={[styles.powerIconContainer, { backgroundColor: powerOn ? colors.current + '22' : colors.signal + '22' }]}>
@@ -240,10 +210,6 @@ export default function UserDashboard() {
           <View style={styles.billingRow}>
             <Text style={styles.billingLabel}>Current bill</Text>
             <Text style={styles.billingAmount}>₹{dashboardData?.currentBill.amount.toFixed(2)}</Text>
-          </View>
-          <View style={styles.billingRow}>
-            <Text style={styles.billingLabel}>Balance</Text>
-            <Text style={styles.balanceAmount}>₹{dashboardData?.balance.toFixed(2)}</Text>
           </View>
           <View style={styles.billingRow}>
             <Text style={styles.billingLabel}>Status</Text>
@@ -344,11 +310,11 @@ export default function UserDashboard() {
               onPress={() => router.push('/user/auto-recharge')}
             >
               <Ionicons
-                name={insights?.isAutoRechargeEnabled ? 'shield-checkmark-outline' : 'shield-outline'}
+                name="shield-outline"
                 size={26}
-                color={insights?.isAutoRechargeEnabled ? colors.success : colors.mist}
+                color={colors.mist}
               />
-              <Text style={styles.actionText}>Auto-recharge</Text>
+              <Text style={styles.actionText}>Auto-pay</Text>
             </TouchableOpacity>
           <TouchableOpacity
             style={styles.actionButton}
@@ -440,31 +406,6 @@ const styles = StyleSheet.create({
     letterSpacing: 2,
     color: colors.mist,
     marginTop: 6,
-  },
-  lowBalanceCard: {
-    flexDirection: 'row',
-    marginHorizontal: spacing.lg,
-    marginBottom: spacing.lg,
-    padding: spacing.md,
-    borderRadius: radii.md,
-    alignItems: 'center',
-    backgroundColor: colors.copper,
-  },
-  lowBalanceInfo: {
-    flex: 1,
-    marginLeft: spacing.md,
-  },
-  lowBalanceTitle: {
-    fontFamily: fonts.display,
-    fontSize: 16,
-    color: colors.void,
-  },
-  lowBalanceText: {
-    fontFamily: fonts.body,
-    fontSize: 13,
-    color: colors.void,
-    marginTop: 2,
-    opacity: 0.85,
   },
   powerCard: {
     flexDirection: 'row',
@@ -570,11 +511,6 @@ const styles = StyleSheet.create({
     fontFamily: fonts.displayBold,
     fontSize: 18,
     color: colors.copper,
-  },
-  balanceAmount: {
-    fontFamily: fonts.displayBold,
-    fontSize: 18,
-    color: colors.current,
   },
   statusBadge: {
     paddingHorizontal: 10,

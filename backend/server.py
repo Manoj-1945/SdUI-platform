@@ -1,6 +1,6 @@
 from fastapi import FastAPI, HTTPException, Header, Response, Request, WebSocket, WebSocketDisconnect, Query
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime, Boolean, Text
+from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime, Boolean, Text, inspect, text
 from sqlalchemy.orm import declarative_base, sessionmaker
 from pydantic import BaseModel, EmailStr
 from typing import Optional
@@ -122,7 +122,6 @@ class DBUser(Base):
     name = Column(String, nullable=True)
     role = Column(String, default="user")
     picture = Column(String, nullable=True)
-    balance = Column(Float, default=1000.0)
     tariffRate = Column(Float, default=8.0)
     session_token = Column(String, nullable=True)
     session_expires_at = Column(DateTime, nullable=True)
@@ -320,6 +319,9 @@ class PowerSpike(Base):
 
 
 Base.metadata.create_all(bind=engine)
+if "balance" in {column["name"] for column in inspect(engine).get_columns("users")}:
+    with engine.begin() as connection:
+        connection.execute(text("UPDATE users SET balance = NULL"))
 
 
 # ESCOM-style tariff constants. These match the structure of a real
@@ -741,7 +743,6 @@ class User(BaseModel):
     name: str
     role: str
     picture: Optional[str] = None
-    balance: float = 0.0
     tariffRate: float = 8.0
     created_at: datetime
 
@@ -810,7 +811,6 @@ def user_to_schema(user: DBUser) -> dict:
         "name": user.name,
         "role": user.role,
         "picture": user.picture,
-        "balance": user.balance,
         "tariffRate": user.tariffRate,
         "created_at": user.created_at or datetime.now(timezone.utc),
     }
@@ -944,7 +944,6 @@ async def signup(user_data: UserSignup):
             password=hash_password(user_data.password),
             name=user_data.name,
             role="user",
-            balance=1000.0,
             tariffRate=8.0,
             session_token=session_token,
             session_expires_at=datetime.now(timezone.utc) + timedelta(days=1),
@@ -1004,7 +1003,7 @@ async def google_auth(token_data: dict):
         user = db.query(DBUser).filter(DBUser.email == email).first()
         if not user:
             user_id = f"user_{uuid.uuid4().hex[:12]}"
-            user = DBUser(user_id=user_id, email=email, name=name, role="user", balance=1000.0, picture=idinfo.get("picture"))
+            user = DBUser(user_id=user_id, email=email, name=name, role="user", picture=idinfo.get("picture"))
             db.add(user)
 
         session_token = f"session_{uuid.uuid4().hex}"
@@ -1277,59 +1276,6 @@ def compute_power_status(db, user_id: str) -> bool:
     return power_on
 
 
-LOW_BALANCE_THRESHOLD = 100.0
-
-
-def check_balance_and_recharge(db, user) -> float:
-    """Tops up the user's wallet automatically if they've enabled
-    auto-recharge and their balance has dropped below their chosen
-    threshold. Otherwise falls back to the plain low-balance warning.
-    Returns the user's current balance after this check runs, so callers
-    can show the up-to-date figure immediately rather than a stale one."""
-    db_user = db.query(DBUser).filter(DBUser.user_id == user.user_id).first()
-    if not db_user:
-        return user.balance
-
-    if db_user.balance >= LOW_BALANCE_THRESHOLD:
-        return db_user.balance
-
-    settings = db.query(AutoRechargeSettings).filter(AutoRechargeSettings.userId == user.user_id).first()
-    if settings and settings.enabled and db_user.balance < settings.threshold:
-        db_user.balance += settings.rechargeAmount
-        db.add(Notification(
-            notifId=f"notif_{uuid.uuid4().hex[:12]}",
-            userId=user.user_id,
-            type="auto_recharge",
-            message=f"Auto-recharge added Rs.{settings.rechargeAmount:.2f} to your balance.",
-            data=None,
-            isRead=False,
-            createdAt=datetime.now(timezone.utc),
-        ))
-        send_push_to_user(db, user.user_id, "Auto-recharge applied", f"Rs.{settings.rechargeAmount:.2f} added to your balance.")
-        db.commit()
-        return db_user.balance
-
-    recent = db.query(Notification).filter(
-        Notification.userId == user.user_id,
-        Notification.type == "low_balance",
-        Notification.createdAt >= datetime.now(timezone.utc) - timedelta(hours=24),
-    ).first()
-    if not recent:
-        db.add(Notification(
-            notifId=f"notif_{uuid.uuid4().hex[:12]}",
-            userId=user.user_id,
-            type="low_balance",
-            message=f"Your balance is low (Rs.{db_user.balance:.2f}). Add funds to avoid disruption.",
-            data=None,
-            isRead=False,
-            createdAt=datetime.now(timezone.utc),
-        ))
-        send_push_to_user(db, user.user_id, "Low balance warning", f"Your balance is Rs.{db_user.balance:.2f}. Add funds soon.")
-        db.commit()
-
-    return db_user.balance
-
-
 class AutoRechargeRequest(BaseModel):
     enabled: bool
     rechargeAmount: float
@@ -1338,42 +1284,14 @@ class AutoRechargeRequest(BaseModel):
 
 @app.get("/api/user/auto-recharge")
 async def get_auto_recharge_settings(request: Request, authorization: Optional[str] = Header(None)):
-    user = await get_current_user(authorization, request)
-    db = SessionLocal()
-    try:
-        settings = db.query(AutoRechargeSettings).filter(AutoRechargeSettings.userId == user.user_id).first()
-        if not settings:
-            return {"enabled": False, "rechargeAmount": 500.0, "threshold": 100.0}
-        return {"enabled": settings.enabled, "rechargeAmount": settings.rechargeAmount, "threshold": settings.threshold}
-    finally:
-        db.close()
+    await get_current_user(authorization, request)
+    return {"enabled": False}
 
 
 @app.post("/api/user/auto-recharge")
 async def save_auto_recharge_settings(req: AutoRechargeRequest, request: Request, authorization: Optional[str] = Header(None)):
-    user = await get_current_user(authorization, request)
-    if req.rechargeAmount <= 0 or req.threshold <= 0:
-        raise HTTPException(status_code=400, detail="Amount and threshold must be positive")
-
-    db = SessionLocal()
-    try:
-        settings = db.query(AutoRechargeSettings).filter(AutoRechargeSettings.userId == user.user_id).first()
-        if settings:
-            settings.enabled = req.enabled
-            settings.rechargeAmount = req.rechargeAmount
-            settings.threshold = req.threshold
-            settings.updatedAt = datetime.now(timezone.utc)
-        else:
-            db.add(AutoRechargeSettings(
-                userId=user.user_id,
-                enabled=req.enabled,
-                rechargeAmount=req.rechargeAmount,
-                threshold=req.threshold,
-            ))
-        db.commit()
-        return {"message": "Auto-recharge settings saved"}
-    finally:
-        db.close()
+    await get_current_user(authorization, request)
+    raise HTTPException(status_code=410, detail="Wallet auto-recharge is disabled. Use provider auto-pay instead.")
 
 
 @app.get("/api/user/dashboard")
@@ -1384,14 +1302,11 @@ async def get_user_dashboard(request: Request, authorization: Optional[str] = He
         latest_reading = db.query(EnergyReading).filter(EnergyReading.userId == user.user_id).order_by(EnergyReading.timestamp.desc()).first()
         latest_bill = db.query(Bill).filter(Bill.userId == user.user_id).order_by(Bill.generatedAt.desc()).first()
         power_on = compute_power_status(db, user.user_id)
-        current_balance = check_balance_and_recharge(db, user)
-
         return {
             "user": user.dict(),
             "currentReading": reading_to_dict(latest_reading) if latest_reading else {"voltage": 0, "current": 0, "power": 0, "energy": 0},
             "currentBill": bill_to_dict(latest_bill) if latest_bill else {"amount": 0, "status": "paid", "dueDate": None},
             "powerStatus": "ON" if power_on else "OFF",
-            "balance": current_balance,
         }
     finally:
         db.close()
@@ -1536,55 +1451,7 @@ async def get_user_bills(request: Request, authorization: Optional[str] = Header
 
 @app.post("/api/user/pay-bill")
 async def pay_bill(payment: PaymentRequest, request: Request, authorization: Optional[str] = Header(None)):
-    user = await get_current_user(authorization, request)
-    db = SessionLocal()
-    try:
-        bill = db.query(Bill).filter(Bill.billId == payment.billId, Bill.userId == user.user_id).first()
-        if not bill:
-            raise HTTPException(status_code=404, detail="Bill not found")
-        if bill.status != "unpaid":
-            raise HTTPException(status_code=400, detail="This bill is no longer payable")
-
-        # Security: always charge the bill's real amount from the database.
-        # Trusting a client-supplied amount allowed a negative value to
-        # inflate the wallet balance while marking the bill paid.
-        charge_amount = bill.amount
-
-        if user.balance < charge_amount:
-            raise HTTPException(status_code=400, detail="Insufficient balance")
-
-        bill.status = "paid"
-        bill.paidAt = datetime.now(timezone.utc)
-
-        db_user = db.query(DBUser).filter(DBUser.user_id == user.user_id).first()
-        if db_user:
-            db_user.balance -= charge_amount
-
-        payment_record = Payment(
-            paymentId=f"pay_{uuid.uuid4().hex[:12]}",
-            userId=user.user_id,
-            billId=payment.billId,
-            amount=charge_amount,
-            paymentDate=datetime.now(timezone.utc),
-            method="wallet",
-        )
-        db.add(payment_record)
-
-        notification = Notification(
-            notifId=f"notif_{uuid.uuid4().hex[:12]}",
-            userId=user.user_id,
-            type="payment",
-            message=f"Payment of ₹{charge_amount} successful",
-            data=None,
-            isRead=False,
-            createdAt=datetime.now(timezone.utc),
-        )
-        db.add(notification)
-        send_push_to_user(db, user.user_id, "Payment successful", f"Rs.{charge_amount} paid successfully.")
-        db.commit()
-        return {"message": "Payment successful", "newBalance": db_user.balance if db_user else user.balance}
-    finally:
-        db.close()
+    raise HTTPException(status_code=410, detail="Wallet payments are disabled. Pay bills through the payment provider.")
 
 
 @app.post("/api/user/create-payment-order")
@@ -2468,13 +2335,10 @@ async def get_usage_insights(request: Request, authorization: Optional[str] = He
                 breakdown.append({"name": appliance.name, "usage": round(appliance_energy, 3)})
         breakdown.sort(key=lambda item: item["usage"], reverse=True)
 
-        recharge_settings = db.query(AutoRechargeSettings).filter(AutoRechargeSettings.userId == user.user_id).first()
-
         return {
             "vsLastMonth": vs_last_month,
             "vsRollingAvg": vs_rolling_avg,
             "hottestAppliance": breakdown[0] if breakdown else None,
-            "isAutoRechargeEnabled": bool(recharge_settings and recharge_settings.enabled),
         }
     finally:
         db.close()
@@ -2659,9 +2523,8 @@ async def get_problematic_users(request: Request, authorization: Optional[str] =
     try:
         unpaid_bills = db.query(Bill).filter(Bill.status == "unpaid").all()
         user_ids_with_unpaid = {bill.userId for bill in unpaid_bills}
-        low_balance_users = db.query(DBUser).filter(DBUser.role == "user", DBUser.balance < 100).all()
         users_with_unpaid = db.query(DBUser).filter(DBUser.role == "user", DBUser.user_id.in_(list(user_ids_with_unpaid))).all()
-        return {"lowBalanceUsers": [user_to_schema(user) for user in low_balance_users], "unpaidBillUsers": [user_to_schema(user) for user in users_with_unpaid], "totalProblematicUsers": len(set([user.user_id for user in low_balance_users] + list(user_ids_with_unpaid)))}
+        return {"lowBalanceUsers": [], "unpaidBillUsers": [user_to_schema(user) for user in users_with_unpaid], "totalProblematicUsers": len(user_ids_with_unpaid)}
     finally:
         db.close()
 

@@ -8,7 +8,6 @@ interface User {
   name: string;
   role: string;
   picture?: string;
-  balance: number;
   tariffRate: number;
 }
 
@@ -104,9 +103,12 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
   logout: async () => {
     const token = get().sessionToken;
+    set({ user: null, sessionToken: null, isLoading: false });
+    await AsyncStorage.removeItem('session_token');
+
     if (token) {
       try {
-        await api.post(
+        void api.post(
           '/api/auth/logout',
           {},
           {
@@ -114,13 +116,13 @@ export const useAuthStore = create<AuthState>((set, get) => ({
               Authorization: `Bearer ${token}`,
             },
           }
-        );
+        ).catch((error) => {
+          console.error('Logout error:', error);
+        });
       } catch (error) {
         console.error('Logout error:', error);
       }
     }
-    set({ user: null });
-    await get().setSessionToken(null);
   },
 
   checkAuth: async () => {

@@ -117,10 +117,6 @@ export default function UserDetail() {
         </View>
         <View style={styles.userStats}>
           <View style={styles.userStat}>
-            <Text style={styles.userStatLabel}>Balance</Text>
-            <Text style={styles.userStatValue}>₹{user.balance?.toFixed(2)}</Text>
-          </View>
-          <View style={styles.userStat}>
             <Text style={styles.userStatLabel}>Tariff Rate</Text>
             <Text style={styles.userStatValue}>₹{user.tariffRate}/kWh</Text>
           </View>

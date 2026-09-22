@@ -3,7 +3,6 @@ import {
   View,
   Text,
   StyleSheet,
-  Switch,
   TouchableOpacity,
   TextInput,
   Alert,
@@ -19,11 +18,6 @@ import { colors, fonts, radii, spacing } from '../../src/theme/tokens';
 export default function AutoRechargeScreen() {
   const router = useRouter();
 
-  // Wallet auto top-up (existing feature - internal balance only)
-  const [isEnabled, setIsEnabled] = useState(false);
-  const [rechargeAmount, setRechargeAmount] = useState('500');
-  const [threshold, setThreshold] = useState('100');
-  const [loading, setLoading] = useState(false);
   const [initialLoading, setInitialLoading] = useState(true);
 
   // Real recurring payment / UPI Autopay (new feature - actual money)
@@ -34,22 +28,8 @@ export default function AutoRechargeScreen() {
   const [mandateLoading, setMandateLoading] = useState(false);
 
   useEffect(() => {
-    fetchSettings();
     fetchMandateStatus();
   }, []);
-
-  const fetchSettings = async () => {
-    try {
-      const response = await api.get('/api/user/auto-recharge');
-      setIsEnabled(response.data.enabled);
-      setRechargeAmount(String(response.data.rechargeAmount));
-      setThreshold(String(response.data.threshold));
-    } catch (error) {
-      // Keep the defaults if this fails - not critical enough to block the screen
-    } finally {
-      setInitialLoading(false);
-    }
-  };
 
   const fetchMandateStatus = async () => {
     try {
@@ -58,22 +38,8 @@ export default function AutoRechargeScreen() {
       setMandateMaxAmount(response.data.maxAmount);
     } catch (error) {
       // Non-critical - leave defaults
-    }
-  };
-
-  const handleSave = async () => {
-    setLoading(true);
-    try {
-      await api.post('/api/user/auto-recharge', {
-        enabled: isEnabled,
-        rechargeAmount: parseInt(rechargeAmount, 10),
-        threshold: parseInt(threshold, 10),
-      });
-      Alert.alert('Success', 'Wallet auto-top-up settings saved.');
-    } catch (error) {
-      Alert.alert('Error', 'Failed to save settings.');
     } finally {
-      setLoading(false);
+      setInitialLoading(false);
     }
   };
 
@@ -263,56 +229,6 @@ export default function AutoRechargeScreen() {
         )}
       </View>
 
-      {/* Wallet auto top-up - existing internal balance feature */}
-      <Text style={styles.sectionLabel}>WALLET AUTO TOP-UP</Text>
-      <View style={styles.card}>
-        <View style={styles.row}>
-          <Text style={styles.label}>Enable Wallet Top-Up</Text>
-          <Switch
-            value={isEnabled}
-            onValueChange={setIsEnabled}
-            trackColor={{ false: colors.mistDim, true: colors.current }}
-            thumbColor={colors.white}
-          />
-        </View>
-        <Text style={styles.description}>
-          When your wallet balance falls below the threshold, it automatically tops up by the
-          specified amount. This adjusts your internal wallet number, not real money.
-        </Text>
-      </View>
-
-      {isEnabled && (
-        <View style={styles.card}>
-          <View style={styles.row}>
-            <Text style={styles.label}>Recharge Amount (₹)</Text>
-            <TextInput
-              style={styles.input}
-              value={rechargeAmount}
-              onChangeText={setRechargeAmount}
-              keyboardType="numeric"
-              placeholderTextColor={colors.mistDim}
-            />
-          </View>
-          <View style={[styles.row, { marginBottom: 0 }]}>
-            <Text style={styles.label}>Low Balance Threshold (₹)</Text>
-            <TextInput
-              style={styles.input}
-              value={threshold}
-              onChangeText={setThreshold}
-              keyboardType="numeric"
-              placeholderTextColor={colors.mistDim}
-            />
-          </View>
-        </View>
-      )}
-
-      <TouchableOpacity
-        style={[styles.saveButton, loading && styles.saveButtonDisabled]}
-        onPress={handleSave}
-        disabled={loading}
-      >
-        <Text style={styles.saveButtonText}>{loading ? 'Saving...' : 'Save Wallet Settings'}</Text>
-      </TouchableOpacity>
     </ScrollView>
   );
 }
