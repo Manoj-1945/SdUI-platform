@@ -7,6 +7,7 @@ import {
   TouchableOpacity,
   RefreshControl,
   Alert,
+  Platform,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useAuthStore } from '../../src/store/authStore';
@@ -48,14 +49,23 @@ export default function AdminDashboard() {
   };
 
   const handleLogout = async () => {
+    const performLogout = async () => {
+      await logout();
+      router.replace('/');
+    };
+
+    if (Platform.OS === 'web') {
+      if (typeof window !== 'undefined' && window.confirm('Are you sure you want to logout?')) {
+        await performLogout();
+      }
+      return;
+    }
+
     Alert.alert('Logout', 'Are you sure you want to logout?', [
       { text: 'Cancel', style: 'cancel' },
       {
         text: 'Logout',
-        onPress: async () => {
-          await logout();
-          router.replace('/');
-        },
+        onPress: performLogout,
       },
     ]);
   };
