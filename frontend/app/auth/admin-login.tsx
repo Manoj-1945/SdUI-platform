@@ -11,6 +11,7 @@ import {
   Alert,
 } from 'react-native';
 import { useRouter } from 'expo-router';
+import type { RelativePathString } from 'expo-router';
 import { useAuthStore } from '../../src/store/authStore';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, fonts, radii, spacing } from '../../src/theme/tokens';
@@ -85,6 +86,13 @@ export default function AdminLogin() {
           </View>
 
           <TouchableOpacity
+            style={styles.forgotPasswordButton}
+            onPress={() => router.push('/auth/forgot-password' as RelativePathString)}
+          >
+            <Text style={styles.forgotPasswordText}>Forgot password?</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
             style={[styles.loginButton, loading && styles.disabledButton]}
             onPress={handleLogin}
             disabled={loading}
@@ -149,6 +157,16 @@ const styles = StyleSheet.create({
     fontFamily: fonts.body,
     fontSize: 15,
     paddingVertical: spacing.md,
+  },
+  forgotPasswordButton: {
+    alignSelf: 'flex-end',
+    paddingVertical: spacing.xs,
+    marginBottom: spacing.sm,
+  },
+  forgotPasswordText: {
+    fontFamily: fonts.display,
+    color: colors.current,
+    fontSize: 14,
   },
   loginButton: {
     backgroundColor: colors.signal,
