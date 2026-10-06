@@ -1135,11 +1135,17 @@ async def forgot_password(req: ForgotPasswordRequest):
             db.commit()
 
             reset_link = f"{FRONTEND_URL}/auth/reset-password?token={token}"
-            send_email(
+            email_sent = send_email(
                 user.email,
                 "Reset your Smart Energy Monitor password",
                 f"Hi {user.name},\n\nClick this link to reset your password (expires in 1 hour):\n{reset_link}\n\nIf you didn't request this, you can ignore this email.",
             )
+            if email_sent:
+                print("[password-reset] SMTP accepted the reset email")
+            else:
+                print("[password-reset] reset email was not sent; inspect preceding [email] log")
+        else:
+            print("[password-reset] no account matched the reset request")
         return {"message": "If that email is registered, a reset link has been sent."}
     finally:
         db.close()
