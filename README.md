@@ -1,6 +1,6 @@
 # Smart Energy Monitoring & Automatic Billing System
 
-A modern mobile application for IoT-based Smart Energy Monitoring and Automatic Billing System for conventional electricity meters, built with Expo (React Native), FastAPI, and MongoDB.
+A modern mobile application for IoT-based Smart Energy Monitoring and Automatic Billing System for conventional electricity meters, built with Expo (React Native), FastAPI, and the database configured through `DATABASE_URL`.
 
 ## 🚀 Features
 
@@ -8,7 +8,8 @@ A modern mobile application for IoT-based Smart Energy Monitoring and Automatic 
 - **Dual Authentication**: Email/Password + Google Social Login (Emergent Auth)
 - **Real-time Dashboard**: Live energy consumption monitoring (voltage, current, power, energy)
 - **Energy History**: View consumption with daily, weekly, and monthly graphs
-- **Automatic Billing**: System calculates bills based on tariff rates
+- **Monthly Billing**: One payable bill per user-specific cycle, anchored to the meter installation date
+- **Monthly Estimate**: Preview current-cycle usage and estimated charges without creating a bill or charging auto-pay
 - **Payment System**: Mock payment system with wallet balance
 - **Power Status**: Real-time power supply status (ON/OFF)
 - **Notifications**: Alerts for low balance, high usage, and bill reminders
@@ -77,18 +78,18 @@ User 5: user5@test.com / user5123
 
 ### Backend
 - **Framework**: FastAPI
-- **Database**: MongoDB (Motor async driver)
+- **Database**: SQLAlchemy database configured with `DATABASE_URL` (use the existing external database in deployment)
 - **Authentication**: JWT + bcrypt + Google OAuth (Emergent Auth)
 - **Validation**: Pydantic
 - **Real-time**: Support for WebSocket/polling
 
 ## 📊 Database Schema
 
-### Collections
-1. **users** - User accounts with role, balance, tariff
-2. **user_sessions** - Active sessions with tokens
-3. **energy_readings** - IoT sensor data (voltage, current, power, energy)
-4. **bills** - Generated bills with amount, status, due dates
+### Tables
+1. **users** - User accounts with role and tariff
+2. **energy_readings** - IoT sensor data (voltage, current, power, energy)
+3. **bills** - Generated bills with amount, status, and due dates
+4. **bill_breakdowns** - Itemized charges for finalized bills
 5. **payments** - Payment history
 6. **notifications** - System notifications
 7. **power_control** - Power ON/OFF control logs
@@ -107,6 +108,7 @@ User 5: user5@test.com / user5123
 - `GET /api/user/dashboard` - Dashboard data
 - `GET /api/user/energy-history?period={daily|weekly|monthly}` - Energy history
 - `GET /api/user/bills` - User bills
+- `GET /api/user/bill-estimate` - Preview current monthly meter movement and estimated charges
 - `POST /api/user/pay-bill` - Pay a bill
 - `GET /api/user/notifications` - Notifications
 - `GET /api/user/predicted-bill` - AI prediction
@@ -120,6 +122,8 @@ User 5: user5@test.com / user5123
 
 ### IoT API
 - `POST /api/iot/data` - Submit sensor data
+
+Bills use the increase in the meter's cumulative kWh counter, not the sum of periodic readings. Each user's monthly cycle is anchored to the meter installation date (falling back to device registration and then account creation). A preview requires a valid reading no more than 10 minutes old, does not create a bill, and does not trigger auto-pay. Final bills are created once per completed cycle; existing auto-pay mandates apply only to those finalized bills. Payment reminders are sent in-app/push 3 days before the due date, on the due date, and once 3 days overdue. This feature reuses the configured external database and existing tables; it does not create a separate persistent database.
 
 ## 🧪 Testing
 
@@ -149,7 +153,7 @@ Results:
 ### Prerequisites
 - Node.js 18+
 - Python 3.11+
-- MongoDB running
+- A database configured through `DATABASE_URL` (use your existing external database in deployment)
 - Expo CLI
 
 ### Backend Setup
@@ -234,7 +238,7 @@ yarn start           # Start Expo dev server
          │
          ▼
 ┌─────────────────┐
-│    MongoDB      │ (Database)
+│ External DB     │ (DATABASE_URL)
 │  - Users        │
 │  - Readings     │
 │  - Bills        │
@@ -297,7 +301,7 @@ EXPO_PUBLIC_BACKEND_URL=https://iot-meter-track.preview.emergentagent.com
 For any issues or questions, refer to:
 - Backend logs: `/var/log/supervisor/backend.err.log`
 - Frontend logs: `/var/log/supervisor/expo.err.log`
-- Database: Check MongoDB collections
+- Database: Check the configured external database tables
 
 ---
 

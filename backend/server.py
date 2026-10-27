@@ -4,7 +4,7 @@ from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime, 
 from sqlalchemy.orm import declarative_base, sessionmaker
 from pydantic import BaseModel, EmailStr
 from typing import Optional
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone, timedelta, date, time
 from zoneinfo import ZoneInfo
 
 IST = ZoneInfo("Asia/Kolkata")
@@ -15,6 +15,8 @@ import csv
 import io
 import uuid
 import hmac
+import math
+import calendar
 import bcrypt
 import razorpay
 import requests
@@ -396,6 +398,142 @@ def compute_bill_breakdown(units: float, tariff_rate: float, subsidized: bool = 
     }
 
 
+def billing_anchor_date(db, user) -> date:
+    """Uses the meter installation date as the monthly cycle anchor."""
+    profile = db.query(ConsumerProfile).filter(ConsumerProfile.userId == user.user_id).first()
+    install_date = (profile.meterInstallDate or "").strip() if profile else ""
+    if install_date:
+        for date_format in ("%d/%m/%Y", "%Y-%m-%d"):
+            try:
+                return datetime.strptime(install_date, date_format).date()
+            except ValueError:
+                continue
+        raise ValueError("Meter install date is invalid. Update it in the consumer profile before billing.")
+
+    device = (
+        db.query(Device)
+        .filter(Device.userId == user.user_id)
+        .order_by(Device.registeredAt.asc())
+        .first()
+    )
+    if device and device.registeredAt:
+        return device.registeredAt.date()
+
+    created_at = user.created_at or datetime.now(timezone.utc)
+    return created_at.date()
+
+
+def _anchor_in_month(anchor_date: date, year: int, month: int) -> date:
+    day = min(anchor_date.day, calendar.monthrange(year, month)[1])
+    return date(year, month, day)
+
+
+def _anchor_datetime(anchor: date) -> datetime:
+    return datetime.combine(anchor, time.min, IST).astimezone(timezone.utc)
+
+
+def _next_anchor_after(anchor_date: date, after: datetime) -> datetime:
+    after_date = after.astimezone(IST).date() if after.tzinfo else after.date()
+    candidate = _anchor_in_month(anchor_date, after_date.year, after_date.month)
+    if candidate <= after_date:
+        year, month = after_date.year, after_date.month + 1
+        if month == 13:
+            year, month = year + 1, 1
+        candidate = _anchor_in_month(anchor_date, year, month)
+    return _anchor_datetime(candidate)
+
+
+def billing_period_for_date(anchor_date: date, reference: datetime):
+    """Returns [start, end) for the monthly cycle containing reference."""
+    if reference.tzinfo is None:
+        reference = reference.replace(tzinfo=timezone.utc)
+    reference_date = reference.astimezone(IST).date()
+    current_anchor = _anchor_in_month(anchor_date, reference_date.year, reference_date.month)
+    if current_anchor > reference_date:
+        year, month = reference_date.year, reference_date.month - 1
+        if month == 0:
+            year, month = year - 1, 12
+        current_anchor = _anchor_in_month(anchor_date, year, month)
+    start = _anchor_datetime(current_anchor)
+    end = _next_anchor_after(anchor_date, start)
+    return start, end
+
+
+def _period_bill_id(user_id: str, period_end: datetime) -> str:
+    period = period_end.astimezone(IST).strftime("%Y%m%d")
+    suffix = uuid.uuid5(uuid.NAMESPACE_URL, f"{user_id}:{period}").hex[:8]
+    return f"bill_m{period}_{suffix}"
+
+
+def _period_end_from_bill_id(bill_id: str):
+    if not bill_id.startswith("bill_m") or len(bill_id) < 14:
+        return None
+    try:
+        period = datetime.strptime(bill_id[6:14], "%Y%m%d").date()
+    except ValueError:
+        return None
+    return _anchor_datetime(period)
+
+
+def meter_energy_delta(db, user_id: str, period_start: datetime, period_end: datetime):
+    """Returns validated meter-counter movement in a [start, end) period."""
+    readings = (
+        db.query(EnergyReading)
+        .filter(
+            EnergyReading.userId == user_id,
+            EnergyReading.timestamp >= period_start,
+            EnergyReading.timestamp < period_end,
+        )
+        .order_by(EnergyReading.timestamp.asc(), EnergyReading.id.asc())
+        .all()
+    )
+    if not readings:
+        raise ValueError("No meter readings were recorded in this billing period.")
+
+    baseline = (
+        db.query(EnergyReading)
+        .filter(
+            EnergyReading.userId == user_id,
+            EnergyReading.timestamp < period_start,
+        )
+        .order_by(EnergyReading.timestamp.desc(), EnergyReading.id.desc())
+        .first()
+    )
+    if not baseline:
+        baseline = readings[0]
+
+    if baseline.energy is None or not math.isfinite(baseline.energy) or baseline.energy < 0:
+        raise ValueError("A valid baseline meter reading is required before billing.")
+
+    previous_energy = baseline.energy
+    for reading in readings:
+        if reading.energy is None or not math.isfinite(reading.energy) or reading.energy < 0:
+            raise ValueError("A meter energy reading is invalid. Check the meter before billing.")
+        if reading.energy < previous_energy:
+            raise ValueError(
+                "The meter counter decreased during this billing period. "
+                "Check for a meter reset."
+            )
+        previous_energy = reading.energy
+
+    latest = readings[-1]
+    return round(latest.energy - baseline.energy, 2), latest
+
+
+def calculate_bill_total(db, user, units: float):
+    if user.tariffRate is None or not math.isfinite(user.tariffRate) or user.tariffRate <= 0:
+        raise ValueError("The account tariff is invalid. Ask an administrator to correct it before billing.")
+    breakdown = compute_bill_breakdown(units, user.tariffRate)
+    unpaid_bills = db.query(Bill).filter(
+        Bill.userId == user.user_id,
+        Bill.status == "unpaid",
+    ).all()
+    arrears = round(sum(bill.amount for bill in unpaid_bills), 2)
+    interest = round(arrears * ARREARS_INTEREST_RATE, 2)
+    total_payable = round(breakdown["currentCharge"] + arrears + interest, 2)
+    return breakdown, arrears, interest, total_payable
+
+
 def attempt_recurring_charge(db, user, bill) -> bool:
     """If this user has an active UPI Autopay/card mandate covering the
     bill amount, silently charges it via Razorpay's recurring payments
@@ -462,46 +600,58 @@ def attempt_recurring_charge(db, user, bill) -> bool:
 
 
 def generate_bill_for_user(db, user):
-    """Sums a user's energy readings since their last bill (or account
-    creation, if they've never had one), computes a real ESCOM-style
-    itemized charge, adds any carried-forward arrears + interest from
-    unpaid bills, and creates a new Bill row. Returns the created Bill,
-    or None if there was nothing to bill."""
+    """Finalizes one due monthly cycle, once, using the user's meter movement."""
+    now = datetime.now(timezone.utc)
+    anchor_date = billing_anchor_date(db, user)
+    if anchor_date > now.astimezone(IST).date():
+        raise ValueError("The meter install date is in the future. Check the consumer profile.")
+
     last_bill = (
         db.query(Bill)
         .filter(Bill.userId == user.user_id)
-        .order_by(Bill.generatedAt.desc())
+        .order_by(Bill.generatedAt.desc(), Bill.id.desc())
         .first()
     )
-    period_start = last_bill.generatedAt if last_bill else user.created_at
-    if period_start and period_start.tzinfo is None:
-        period_start = period_start.replace(tzinfo=timezone.utc)
+    if last_bill:
+        marked_period_end = _period_end_from_bill_id(last_bill.billId)
+        if marked_period_end:
+            period_start = marked_period_end
+        else:
+            legacy_generated_at = last_bill.generatedAt
+            if legacy_generated_at.tzinfo is None:
+                legacy_generated_at = legacy_generated_at.replace(tzinfo=timezone.utc)
+            period_start = max(
+                _anchor_datetime(anchor_date),
+                legacy_generated_at.astimezone(timezone.utc),
+            )
+    else:
+        period_start = _anchor_datetime(anchor_date)
 
-    readings = (
-        db.query(EnergyReading)
-        .filter(EnergyReading.userId == user.user_id, EnergyReading.timestamp >= period_start)
-        .all()
-    )
-    total_energy = sum(r.energy for r in readings)
-    if total_energy <= 0:
+    period_end = _next_anchor_after(anchor_date, period_start)
+    if period_end > now:
         return None
 
-    breakdown = compute_bill_breakdown(total_energy, user.tariffRate)
+    bill_id = _period_bill_id(user.user_id, period_end)
+    if db.query(Bill).filter(Bill.billId == bill_id).first():
+        return None
 
-    # Carry forward any previously unpaid bills as arrears, with simple interest.
-    # Mark them as rolled forward so they're not double-counted next cycle -
-    # their amount now lives inside this new bill's total instead.
-    unpaid_bills = db.query(Bill).filter(Bill.userId == user.user_id, Bill.status == "unpaid").all()
-    arrears = round(sum(b.amount for b in unpaid_bills), 2)
-    interest = round(arrears * ARREARS_INTEREST_RATE, 2)
+    total_energy, _latest_reading = meter_energy_delta(
+        db, user.user_id, period_start, period_end
+    )
+    breakdown, arrears, interest, total_payable = calculate_bill_total(
+        db, user, total_energy
+    )
+
+    # Carry forward prior unpaid bills so their balance is not lost.
+    unpaid_bills = db.query(Bill).filter(
+        Bill.userId == user.user_id,
+        Bill.status == "unpaid",
+    ).all()
     for old_bill in unpaid_bills:
         old_bill.status = "rolled_forward"
 
-    total_payable = round(breakdown["currentCharge"] + arrears + interest, 2)
     fully_covered = total_payable <= 0
 
-    now = datetime.now(timezone.utc)
-    bill_id = f"bill_{uuid.uuid4().hex[:12]}"
     bill = Bill(
         billId=bill_id,
         userId=user.user_id,
@@ -553,60 +703,98 @@ def generate_bill_for_user(db, user):
 
 
 def generate_bills_for_all_users():
-    """Runs monthly (see scheduler below): generates a bill for every
-    regular user based on their energy usage since their last bill."""
+    """Finalizes due monthly bills using each user's meter-install-date cycle."""
     db = SessionLocal()
     try:
         users = db.query(DBUser).filter(DBUser.role == "user").all()
         generated = 0
         for user in users:
-            if generate_bill_for_user(db, user):
-                generated += 1
+            try:
+                if generate_bill_for_user(db, user):
+                    generated += 1
+            except ValueError as exc:
+                print(f"[billing] Skipped user {user.user_id}: {exc}")
+                notify_billing_issue(db, user, str(exc))
         db.commit()
-        print(f"[billing] Monthly run complete: {generated} bill(s) generated")
+        print(f"[billing] Monthly cycle check complete: {generated} bill(s) generated")
     finally:
         db.close()
 
 
+def notify_billing_issue(db, user, reason: str):
+    message = f"Monthly bill not generated: {reason}"
+    recent_issue = db.query(Notification).filter(
+        Notification.userId == user.user_id,
+        Notification.type == "bill_generation_issue",
+        Notification.message == message,
+        Notification.createdAt >= datetime.now(timezone.utc) - timedelta(days=1),
+    ).first()
+    if recent_issue:
+        return
+    db.add(Notification(
+        notifId=f"notif_{uuid.uuid4().hex[:12]}",
+        userId=user.user_id,
+        type="bill_generation_issue",
+        message=message,
+        data=None,
+        isRead=False,
+        createdAt=datetime.now(timezone.utc),
+    ))
+    send_push_to_user(db, user.user_id, "Monthly bill needs attention", reason)
+
+
 def send_due_bill_reminders():
-    """Runs daily: reminds anyone with an unpaid bill due within 2 days.
-    Power turns off once a bill is unpaid past its due date, so this gives
-    people a heads-up before that actually happens, not just after."""
+    """Sends one push/in-app reminder 3 days before, on, and 3 days after due date."""
     db = SessionLocal()
     try:
-        soon = datetime.now(timezone.utc) + timedelta(days=2)
-        due_soon_bills = (
+        today = datetime.now(timezone.utc).astimezone(IST).date()
+        unpaid_bills = (
             db.query(Bill)
-            .filter(Bill.status == "unpaid", Bill.dueDate <= soon)
+            .filter(Bill.status == "unpaid", Bill.dueDate.is_not(None))
             .all()
         )
         sent_count = 0
-        for bill in due_soon_bills:
-            already_reminded = (
-                db.query(Notification)
-                .filter(
-                    Notification.userId == bill.userId,
-                    Notification.type == "bill_due_reminder",
-                    Notification.data == json.dumps({"billId": bill.billId}),
-                    Notification.createdAt >= datetime.now(timezone.utc) - timedelta(hours=20),
-                )
-                .first()
-            )
-            if already_reminded:
-                continue  # already reminded about this bill today
+        for bill in unpaid_bills:
+            due_date = bill.dueDate
+            if due_date.tzinfo is None:
+                due_date = due_date.replace(tzinfo=timezone.utc)
+            days_until_due = (due_date.astimezone(IST).date() - today).days
+            if days_until_due == 3:
+                stage = "three_days_before"
+                title = "Bill due in 3 days"
+                message = f"Your bill of Rs.{bill.amount:.2f} is due in 3 days."
+            elif days_until_due == 0:
+                stage = "due_today"
+                title = "Bill due today"
+                message = f"Your bill of Rs.{bill.amount:.2f} is due today."
+            elif days_until_due == -3:
+                stage = "three_days_overdue"
+                title = "Bill overdue"
+                message = f"Your bill of Rs.{bill.amount:.2f} is 3 days overdue. Please pay it."
+            else:
+                continue
 
+            reminder_data = json.dumps({"billId": bill.billId, "stage": stage})
+            already_reminded = db.query(Notification).filter(
+                Notification.userId == bill.userId,
+                Notification.type == "bill_due_reminder",
+                Notification.data == reminder_data,
+            ).first()
+            if already_reminded:
+                continue
             db.add(Notification(
                 notifId=f"notif_{uuid.uuid4().hex[:12]}",
                 userId=bill.userId,
                 type="bill_due_reminder",
-                message=f"Your bill of Rs.{bill.amount} is due soon. Pay before it's overdue to avoid power being cut.",
-                data=json.dumps({"billId": bill.billId}),
+                message=message,
+                data=reminder_data,
                 isRead=False,
                 createdAt=datetime.now(timezone.utc),
             ))
-            send_push_to_user(db, bill.userId, "Bill due soon", f"Rs.{bill.amount} due soon - pay now to avoid power cutoff.")
+            send_push_to_user(db, bill.userId, title, message)
+            sent_count += 1
         db.commit()
-        print(f"[billing] Due-bill reminder run: {len(due_soon_bills)} reminder(s) sent")
+        print(f"[billing] Due-bill reminder run: {sent_count} reminder(s) sent")
     finally:
         db.close()
 
@@ -689,13 +877,10 @@ async def start_billing_scheduler():
     if loop is not None and loop.is_closed():
         scheduler = AsyncIOScheduler()
 
-    # Fires on the 1st of every month at 00:00 UTC. Render's free tier
-    # sleeps when idle, so this won't fire reliably unless something
-    # keeps the service awake (see /api/admin/generate-bills as a manual
-    # fallback, or an external pinger/cron hitting the service beforehand).
+    # Check daily so each user's meter-install-date cycle is billed on time.
     scheduler.add_job(
         generate_bills_for_all_users,
-        CronTrigger(day=1, hour=0, minute=0),
+        CronTrigger(hour=0, minute=5),
         id="monthly_billing",
         replace_existing=True,
     )
@@ -855,11 +1040,17 @@ def user_to_schema(user: DBUser) -> dict:
     }
 
 
-def bill_to_dict(bill: Bill) -> dict:
+def bill_to_dict(bill: Bill, breakdown: Optional[BillBreakdown] = None) -> dict:
+    period_end = _period_end_from_bill_id(bill.billId)
     return {
         "billId": bill.billId,
         "userId": bill.userId,
         "amount": bill.amount,
+        "billMonth": (
+            f"Monthly cycle ending {period_end.astimezone(IST).date().isoformat()}"
+            if period_end else None
+        ),
+        "unitsConsumed": breakdown.unitsConsumed if breakdown else 0.0,
         "status": bill.status,
         "generatedAt": bill.generatedAt,
         "paidAt": bill.paidAt,
@@ -1493,7 +1684,81 @@ async def get_user_bills(request: Request, authorization: Optional[str] = Header
     db = SessionLocal()
     try:
         bills = db.query(Bill).filter(Bill.userId == user.user_id).order_by(Bill.generatedAt.desc()).all()
-        return {"bills": [bill_to_dict(item) for item in bills]}
+        breakdowns = {
+            item.billId: item
+            for item in db.query(BillBreakdown)
+            .filter(BillBreakdown.billId.in_([bill.billId for bill in bills]))
+            .all()
+        } if bills else {}
+        return {"bills": [bill_to_dict(item, breakdowns.get(item.billId)) for item in bills]}
+    finally:
+        db.close()
+
+
+@app.get("/api/user/bill-estimate")
+async def get_user_bill_estimate(request: Request, authorization: Optional[str] = Header(None)):
+    user = await get_current_user(authorization, request)
+    db = SessionLocal()
+    try:
+        account = db.query(DBUser).filter(DBUser.user_id == user.user_id).first()
+        if not account:
+            raise HTTPException(status_code=404, detail="User account not found")
+        try:
+            now = datetime.now(timezone.utc)
+            anchor_date = billing_anchor_date(db, account)
+            if anchor_date > now.astimezone(IST).date():
+                raise ValueError("The meter install date is in the future. Check the consumer profile.")
+            period_start, period_end = billing_period_for_date(anchor_date, now)
+            last_bill = (
+                db.query(Bill)
+                .filter(Bill.userId == account.user_id)
+                .order_by(Bill.generatedAt.desc(), Bill.id.desc())
+                .first()
+            )
+            if last_bill:
+                marked_period_end = _period_end_from_bill_id(last_bill.billId)
+                if marked_period_end and marked_period_end > period_start:
+                    period_start = marked_period_end
+                elif not marked_period_end:
+                    legacy_generated_at = last_bill.generatedAt
+                    if legacy_generated_at.tzinfo is None:
+                        legacy_generated_at = legacy_generated_at.replace(tzinfo=timezone.utc)
+                    if legacy_generated_at > period_start:
+                        period_start = legacy_generated_at.astimezone(timezone.utc)
+
+            if period_start >= period_end:
+                raise ValueError("The current monthly billing period is already finalized.")
+            units, latest_reading = meter_energy_delta(
+                db, account.user_id, period_start, period_end
+            )
+            reading_time = latest_reading.timestamp
+            if reading_time.tzinfo is None:
+                reading_time = reading_time.replace(tzinfo=timezone.utc)
+            reading_age = now - reading_time.astimezone(timezone.utc)
+            if reading_age < timedelta(0):
+                raise ValueError("The latest meter reading is timestamped in the future. Check the meter clock.")
+            if reading_age > timedelta(minutes=10):
+                raise ValueError(
+                    "The latest meter reading is older than 10 minutes. "
+                    "Check the meter connection and try again."
+                )
+            breakdown, arrears, interest, estimated_amount = calculate_bill_total(
+                db, account, units
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc))
+        return {
+            "isEstimate": True,
+            "cycleStart": period_start,
+            "cycleEnd": period_end,
+            "lastReadingAt": latest_reading.timestamp,
+            "unitsConsumed": units,
+            "estimatedAmount": max(0.0, estimated_amount),
+            "currentCharge": breakdown["currentCharge"],
+            "arrears": arrears,
+            "interest": interest,
+            "breakdown": breakdown,
+        }
     finally:
         db.close()
 
@@ -2312,14 +2577,20 @@ async def admin_generate_bills(request: Request, authorization: Optional[str] = 
     try:
         users = db.query(DBUser).filter(DBUser.role == "user").all()
         generated = 0
+        skipped = 0
         for user in users:
-            if generate_bill_for_user(db, user):
-                generated += 1
+            try:
+                if generate_bill_for_user(db, user):
+                    generated += 1
+            except ValueError as exc:
+                skipped += 1
+                print(f"[billing] Skipped user {user.user_id}: {exc}")
+                notify_billing_issue(db, user, str(exc))
         db.commit()
     finally:
         db.close()
 
-    return {"message": f"{generated} bill(s) generated"}
+    return {"message": f"{generated} bill(s) generated; {skipped} user(s) skipped due to invalid or missing readings."}
 
 
 @app.post("/api/admin/send-due-reminders")

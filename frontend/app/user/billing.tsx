@@ -17,7 +17,9 @@ import { colors, fonts, radii, spacing } from '../../src/theme/tokens';
 export default function Billing() {
   const router = useRouter();
   const [bills, setBills] = useState<any[]>([]);
+  const [estimate, setEstimate] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [loadingEstimate, setLoadingEstimate] = useState(false);
 
   useEffect(() => {
     fetchBills();
@@ -32,6 +34,37 @@ export default function Billing() {
     } finally {
       setLoading(false);
     }
+  };
+
+  const fetchEstimate = async () => {
+    setLoadingEstimate(true);
+    try {
+      const response = await api.get('/api/user/bill-estimate');
+      setEstimate(response.data);
+    } catch (error: any) {
+      setEstimate(null);
+      Alert.alert(
+        'Could not load estimate',
+        error.response?.data?.detail || 'Please check your meter reading and try again.'
+      );
+    } finally {
+      setLoadingEstimate(false);
+    }
+  };
+
+  const confirmEstimateRefresh = () => {
+    const message = 'This is only an estimate. It will not create a bill or charge your payment method.';
+    if (Platform.OS === 'web') {
+      if (typeof window !== 'undefined' && window.confirm(`Refresh monthly estimate?\n\n${message}`)) {
+        void fetchEstimate();
+      }
+      return;
+    }
+
+    Alert.alert('Refresh monthly estimate?', message, [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Refresh estimate', onPress: fetchEstimate },
+    ]);
   };
 
   const handleExportCsv = async () => {
@@ -179,6 +212,45 @@ export default function Billing() {
       </View>
 
       <ScrollView style={styles.content}>
+        <TouchableOpacity
+          style={[styles.generateButton, loadingEstimate && styles.generateButtonDisabled]}
+          onPress={confirmEstimateRefresh}
+          disabled={loadingEstimate}
+        >
+          {loadingEstimate ? (
+            <ActivityIndicator color={colors.void} />
+          ) : (
+            <>
+              <Ionicons name="stats-chart-outline" size={20} color={colors.void} />
+              <Text style={styles.generateButtonText}>
+                {estimate ? 'Refresh monthly estimate' : 'View monthly estimate'}
+              </Text>
+            </>
+          )}
+        </TouchableOpacity>
+        <Text style={styles.generateHint}>
+          One payable bill is created per month. This estimate does not charge you.
+        </Text>
+
+        {estimate && (
+          <View style={styles.estimateCard}>
+            <Text style={styles.estimateTitle}>CURRENT MONTHLY ESTIMATE</Text>
+            <Text style={styles.estimateAmount}>
+              ₹{Number(estimate.estimatedAmount).toFixed(2)}
+            </Text>
+            <Text style={styles.estimateDetails}>
+              {Number(estimate.unitsConsumed).toFixed(2)} kWh recorded
+            </Text>
+            <Text style={styles.estimateDetails}>
+              Cycle: {new Date(estimate.cycleStart).toLocaleDateString()} –{' '}
+              {new Date(estimate.cycleEnd).toLocaleDateString()}
+            </Text>
+            <Text style={styles.estimateDisclaimer}>
+              Estimate only. Your final monthly bill may differ.
+            </Text>
+          </View>
+        )}
+
         {bills.length === 0 ? (
           <View style={styles.emptyState}>
             <Ionicons name="receipt-outline" size={64} color={colors.mist} />
@@ -283,6 +355,66 @@ const styles = StyleSheet.create({
   content: {
     flex: 1,
     paddingHorizontal: spacing.lg,
+  },
+  generateButton: {
+    flexDirection: 'row',
+    backgroundColor: colors.current,
+    borderRadius: radii.sm,
+    padding: spacing.sm + 4,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    marginTop: spacing.sm,
+  },
+  generateButtonDisabled: {
+    opacity: 0.65,
+  },
+  generateButtonText: {
+    fontFamily: fonts.display,
+    color: colors.void,
+    fontSize: 15,
+  },
+  generateHint: {
+    fontFamily: fonts.body,
+    color: colors.mist,
+    fontSize: 12,
+    textAlign: 'center',
+    marginTop: spacing.xs,
+    marginBottom: spacing.md,
+  },
+  estimateCard: {
+    backgroundColor: colors.circuit,
+    borderRadius: radii.md,
+    padding: spacing.md,
+    marginBottom: spacing.lg,
+    borderWidth: 1,
+    borderColor: colors.current + '55',
+    alignItems: 'center',
+  },
+  estimateTitle: {
+    fontFamily: fonts.mono,
+    color: colors.mist,
+    fontSize: 11,
+    letterSpacing: 1,
+  },
+  estimateAmount: {
+    fontFamily: fonts.displayBold,
+    color: colors.current,
+    fontSize: 34,
+    marginTop: spacing.xs,
+  },
+  estimateDetails: {
+    fontFamily: fonts.body,
+    color: colors.white,
+    fontSize: 13,
+    marginTop: spacing.xs,
+  },
+  estimateDisclaimer: {
+    fontFamily: fonts.body,
+    color: colors.mist,
+    fontSize: 11,
+    textAlign: 'center',
+    marginTop: spacing.sm,
   },
   emptyState: {
     alignItems: 'center',
