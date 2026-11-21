@@ -20,6 +20,7 @@ const ICON_MAP: Record<string, { icon: string; color: string }> = {
   power_control: { icon: 'flash', color: colors.signal },
   power_spike: { icon: 'trending-up', color: colors.signal },
   bill_due_reminder: { icon: 'time', color: colors.copper },
+  usage_payment_reminder: { icon: 'card', color: colors.copper },
   bill_generated: { icon: 'receipt', color: colors.copper },
   low_balance: { icon: 'wallet', color: colors.copper },
   auto_recharge: { icon: 'shield-checkmark', color: colors.success },

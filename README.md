@@ -10,7 +10,7 @@ A modern mobile application for IoT-based Smart Energy Monitoring and Automatic 
 - **Energy History**: View consumption with daily, weekly, and monthly graphs
 - **Monthly Billing**: One payable bill per user-specific cycle, anchored to the meter installation date
 - **Monthly Estimate**: Preview current-cycle usage and estimated charges without creating a bill or charging auto-pay
-- **Demo Usage Payments**: Preview recent meter movement over a custom minute window and pay through Razorpay test mode; verified amounts credit the monthly bill, with excess carried forward
+- **Demo Usage Payments**: Preview recent meter movement over a custom minute window and pay through Razorpay test mode; verified amounts credit the monthly bill, with excess carried forward. An unpaid quote triggers a reminder after one minute.
 - **Payment System**: Mock payment system with wallet balance
 - **Power Status**: Real-time power supply status (ON/OFF)
 - **Notifications**: Alerts for low balance, high usage, and bill reminders

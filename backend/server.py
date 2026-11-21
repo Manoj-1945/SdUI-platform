@@ -28,6 +28,7 @@ from google.oauth2 import id_token
 from google.auth.transport import requests as google_requests
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
+from apscheduler.triggers.interval import IntervalTrigger
 
 load_dotenv()
 
@@ -233,6 +234,21 @@ class UsagePrepayment(Base):
     createdAt = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     expiresAt = Column(DateTime, nullable=False)
     paidAt = Column(DateTime, nullable=True)
+
+
+class UsagePaymentReminder(Base):
+    __tablename__ = "usage_payment_reminders"
+    id = Column(Integer, primary_key=True)
+    reminderId = Column(String, unique=True, nullable=False, index=True)
+    userId = Column(String, nullable=False, index=True)
+    linkedUsagePaymentId = Column(String, nullable=True, index=True)
+    amount = Column(Float, nullable=False)
+    unitsConsumed = Column(Float, nullable=False)
+    minutes = Column(Integer, nullable=False)
+    status = Column(String, default="pending", index=True)
+    createdAt = Column(DateTime, nullable=False)
+    notifyAt = Column(DateTime, nullable=False, index=True)
+    notifiedAt = Column(DateTime, nullable=True)
 
 
 class Notification(Base):
@@ -966,6 +982,39 @@ def send_due_bill_reminders():
         db.close()
 
 
+def send_due_usage_payment_reminders():
+    db = SessionLocal()
+    try:
+        now = datetime.now(timezone.utc)
+        reminders = db.query(UsagePaymentReminder).filter(
+            UsagePaymentReminder.status == "pending",
+            UsagePaymentReminder.notifyAt <= now,
+        ).all()
+        for reminder in reminders:
+            title = "Usage payment reminder"
+            message = (
+                f"You calculated Rs.{reminder.amount:.2f} for "
+                f"{reminder.unitsConsumed:.3f} kWh, but haven't completed payment."
+            )
+            db.add(Notification(
+                notifId=f"notif_{uuid.uuid4().hex[:12]}",
+                userId=reminder.userId,
+                type="usage_payment_reminder",
+                message=message,
+                data=json.dumps({"reminderId": reminder.reminderId}),
+                isRead=False,
+                createdAt=now,
+            ))
+            send_push_to_user(db, reminder.userId, title, message)
+            reminder.status = "sent"
+            reminder.notifiedAt = now
+        db.commit()
+        if reminders:
+            print(f"[billing] Usage payment reminders sent: {len(reminders)}")
+    finally:
+        db.close()
+
+
 def check_offline_devices():
     """Runs periodically: flags any device that was active but has gone
     silent, and notifies both the user and admins. Without this, someone
@@ -1062,6 +1111,14 @@ async def start_billing_scheduler():
         CronTrigger(minute="*/15"),
         id="offline_device_check",
         replace_existing=True,
+    )
+    scheduler.add_job(
+        send_due_usage_payment_reminders,
+        IntervalTrigger(seconds=5),
+        id="usage_payment_reminders",
+        replace_existing=True,
+        coalesce=True,
+        max_instances=1,
     )
     scheduler.start()
 
@@ -1166,6 +1223,7 @@ class VerifyPaymentRequest(BaseModel):
 
 class UsagePaymentRequest(BaseModel):
     minutes: int = Field(ge=1, le=1440)
+    reminderId: Optional[str] = None
 
 
 class VerifyUsagePaymentRequest(BaseModel):
@@ -1963,7 +2021,25 @@ async def preview_usage_payment(
             quote = current_usage_payment_quote(db, account, payment_req.minutes)
         except ValueError as exc:
             raise HTTPException(status_code=409, detail=str(exc))
+        now = datetime.now(timezone.utc)
+        db.query(UsagePaymentReminder).filter(
+            UsagePaymentReminder.userId == user.user_id,
+            UsagePaymentReminder.status == "pending",
+        ).update({"status": "superseded"}, synchronize_session=False)
+        reminder = UsagePaymentReminder(
+            reminderId=f"usage_rem_{uuid.uuid4().hex[:16]}",
+            userId=user.user_id,
+            amount=quote["amount"],
+            unitsConsumed=quote["unitsConsumed"],
+            minutes=payment_req.minutes,
+            status="pending",
+            createdAt=now,
+            notifyAt=now + timedelta(minutes=1),
+        )
+        db.add(reminder)
+        db.commit()
         return {
+            "reminderId": reminder.reminderId,
             "minutes": payment_req.minutes,
             "unitsConsumed": quote["unitsConsumed"],
             "tariffRate": quote["tariffRate"],
@@ -2003,6 +2079,17 @@ async def create_usage_payment_order(
             raise HTTPException(status_code=404, detail="User account not found")
 
         now = datetime.now(timezone.utc)
+        reminder = None
+        if payment_req.reminderId:
+            reminder = db.query(UsagePaymentReminder).filter(
+                UsagePaymentReminder.reminderId == payment_req.reminderId,
+                UsagePaymentReminder.userId == user.user_id,
+            ).first()
+            if not reminder:
+                raise HTTPException(status_code=404, detail="Usage payment reminder not found.")
+            if reminder.status not in ("pending", "sent"):
+                raise HTTPException(status_code=409, detail="This usage quote is no longer active.")
+
         active_pending = db.query(UsagePrepayment).filter(
             UsagePrepayment.userId == user.user_id,
             UsagePrepayment.status == "pending",
@@ -2054,6 +2141,8 @@ async def create_usage_payment_order(
             expiresAt=now + timedelta(minutes=15),
         )
         db.add(usage_payment)
+        if reminder:
+            reminder.linkedUsagePaymentId = usage_payment_id
         db.commit()
         return {
             "usagePaymentId": usage_payment_id,
@@ -2108,6 +2197,10 @@ async def verify_usage_payment(
         usage_payment.razorpayPaymentId = verify_req.razorpay_payment_id
         usage_payment.status = "paid"
         usage_payment.paidAt = now
+        db.query(UsagePaymentReminder).filter(
+            UsagePaymentReminder.userId == user.user_id,
+            UsagePaymentReminder.linkedUsagePaymentId == usage_payment.usagePaymentId,
+        ).update({"status": "paid"}, synchronize_session=False)
         db.add(Payment(
             paymentId=verify_req.razorpay_payment_id,
             userId=user.user_id,

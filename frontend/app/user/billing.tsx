@@ -110,6 +110,7 @@ export default function Billing() {
     try {
       const orderRes = await api.post('/api/user/usage-payment/order', {
         minutes: Number(usageMinutes),
+        reminderId: usageQuote?.reminderId,
       });
       const {
         usagePaymentId,
@@ -360,6 +361,7 @@ export default function Billing() {
           <Text style={styles.estimateDisclaimer}>
             Choose a recent window, calculate its meter movement, and make a Razorpay test payment.
             It will be credited to the monthly bill; no live payment is accepted here.
+            If you don't complete payment, we'll remind you after one minute.
           </Text>
           <View style={styles.usageInputRow}>
             <Text style={styles.detailLabel}>Usage window (minutes)</Text>

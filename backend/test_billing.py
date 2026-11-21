@@ -225,6 +225,57 @@ def test_usage_payment_preview_uses_recent_cumulative_meter_movement(db_factory)
     assert response.json()["amount"] == pytest.approx(12.0)
     assert response.json()["paymentMode"] == "test"
     assert response.json()["monthlyCredit"] is True
+    db = db_factory()
+    reminder = db.query(server.UsagePaymentReminder).one()
+    assert response.json()["reminderId"] == reminder.reminderId
+    assert reminder.status == "pending"
+    assert reminder.notifyAt - reminder.createdAt == timedelta(minutes=1)
+    db.close()
+
+
+def test_unpaid_usage_quote_sends_one_reminder_after_deadline(db_factory, monkeypatch):
+    db = db_factory()
+    now = datetime.now(timezone.utc)
+    user = create_user(
+        db,
+        now - timedelta(days=60),
+        session_token="test-session",
+        meter_install_date=now.strftime("%d/%m/%Y"),
+    )
+    add_reading(db, user.user_id, now - timedelta(minutes=9), 10.0)
+    add_reading(db, user.user_id, now - timedelta(minutes=2), 11.5)
+    db.close()
+
+    with TestClient(server.app, cookies={"session_token": "test-session"}) as client:
+        response = client.post("/api/user/usage-payment/preview", json={"minutes": 10})
+
+    assert response.status_code == 200
+    db = db_factory()
+    reminder = db.query(server.UsagePaymentReminder).one()
+    reminder.notifyAt = datetime.now(timezone.utc) - timedelta(seconds=1)
+    db.commit()
+    db.close()
+
+    pushed = []
+    monkeypatch.setattr(
+        server,
+        "send_push_to_user",
+        lambda _db, user_id, title, body: pushed.append((user_id, title, body)),
+    )
+    server.send_due_usage_payment_reminders()
+    server.send_due_usage_payment_reminders()
+
+    db = db_factory()
+    reminder = db.query(server.UsagePaymentReminder).one()
+    notifications = db.query(server.Notification).filter_by(
+        userId="user_test",
+        type="usage_payment_reminder",
+    ).all()
+    assert reminder.status == "sent"
+    assert len(notifications) == 1
+    assert len(pushed) == 1
+    assert "haven't completed payment" in notifications[0].message
+    db.close()
 
 
 def test_usage_payment_order_is_blocked_outside_razorpay_test_mode(
@@ -276,8 +327,15 @@ def test_usage_payment_test_checkout_verifies_once_and_records_credit(db_factory
     )
 
     with TestClient(server.app, cookies={"session_token": "test-session"}) as client:
+        preview_response = client.post(
+            "/api/user/usage-payment/preview", json={"minutes": 10}
+        )
         order_response = client.post(
-            "/api/user/usage-payment/order", json={"minutes": 10}
+            "/api/user/usage-payment/order",
+            json={
+                "minutes": 10,
+                "reminderId": preview_response.json()["reminderId"],
+            },
         )
         order = order_response.json()
         verification_payload = {
@@ -305,6 +363,8 @@ def test_usage_payment_test_checkout_verifies_once_and_records_credit(db_factory
     assert prepayment.amount == pytest.approx(12.0)
     assert payment.method == "razorpay_test_usage"
     assert payment.billId == prepayment.usagePaymentId
+    reminder = db.query(server.UsagePaymentReminder).one()
+    assert reminder.status == "paid"
     db.close()
 
 
