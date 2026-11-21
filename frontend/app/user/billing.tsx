@@ -8,6 +8,7 @@ import {
   Alert,
   Platform,
   ActivityIndicator,
+  TextInput,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -20,6 +21,10 @@ export default function Billing() {
   const [estimate, setEstimate] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [loadingEstimate, setLoadingEstimate] = useState(false);
+  const [usageMinutes, setUsageMinutes] = useState('10');
+  const [usageQuote, setUsageQuote] = useState<any>(null);
+  const [loadingUsageQuote, setLoadingUsageQuote] = useState(false);
+  const [payingUsage, setPayingUsage] = useState(false);
 
   useEffect(() => {
     fetchBills();
@@ -65,6 +70,100 @@ export default function Billing() {
       { text: 'Cancel', style: 'cancel' },
       { text: 'Refresh estimate', onPress: fetchEstimate },
     ]);
+  };
+
+  const fetchUsageQuote = async () => {
+    const minutes = Number(usageMinutes);
+    if (!Number.isInteger(minutes) || minutes < 1 || minutes > 1440) {
+      Alert.alert('Invalid time window', 'Enter a whole number from 1 to 1440 minutes.');
+      return;
+    }
+
+    setLoadingUsageQuote(true);
+    try {
+      const response = await api.post('/api/user/usage-payment/preview', { minutes });
+      setUsageQuote(response.data);
+    } catch (error: any) {
+      setUsageQuote(null);
+      Alert.alert(
+        'Could not calculate usage payment',
+        error.response?.data?.detail || 'Check that your meter is sending recent readings.'
+      );
+    } finally {
+      setLoadingUsageQuote(false);
+    }
+  };
+
+  const handlePayUsage = async () => {
+    if (Platform.OS !== 'web') {
+      Alert.alert('Not supported yet', 'Test checkout is currently available only on the web app.');
+      return;
+    }
+
+    const scriptLoaded = await loadRazorpayScript();
+    if (!scriptLoaded) {
+      Alert.alert('Error', 'Could not load the payment gateway. Check your connection and try again.');
+      return;
+    }
+
+    setPayingUsage(true);
+    try {
+      const orderRes = await api.post('/api/user/usage-payment/order', {
+        minutes: Number(usageMinutes),
+      });
+      const {
+        usagePaymentId,
+        orderId,
+        amount,
+        currency,
+        keyId,
+        unitsConsumed,
+      } = orderRes.data;
+      const checkout = new (window as any).Razorpay({
+        key: keyId,
+        amount,
+        currency,
+        name: 'Smart Energy Monitor (Test)',
+        description: `${unitsConsumed.toFixed(3)} kWh usage prepayment`,
+        order_id: orderId,
+        modal: {
+          ondismiss: () => setPayingUsage(false),
+        },
+        handler: async (response: any) => {
+          try {
+            await api.post('/api/user/usage-payment/verify', {
+              usagePaymentId,
+              razorpay_order_id: response.razorpay_order_id,
+              razorpay_payment_id: response.razorpay_payment_id,
+              razorpay_signature: response.razorpay_signature,
+            });
+            Alert.alert('Test payment successful', 'Payment was credited to your monthly bill.');
+            setUsageQuote(null);
+            await Promise.all([fetchBills(), fetchEstimate()]);
+          } catch (error: any) {
+            Alert.alert(
+              'Verification failed',
+              error.response?.data?.detail ||
+                'Test payment could not be verified. Please contact support if checkout reported success.'
+            );
+          } finally {
+            setPayingUsage(false);
+          }
+        },
+        theme: { color: colors.copper },
+      });
+      checkout.on('payment.failed', () => {
+        setPayingUsage(false);
+        Alert.alert('Test payment failed', 'The payment was not credited. Please try again.');
+      });
+      checkout.open();
+    } catch (error: any) {
+      setPayingUsage(false);
+      Alert.alert(
+        'Could not start test payment',
+        error.response?.data?.detail || 'Please refresh the meter estimate and try again.'
+      );
+    }
   };
 
   const handleExportCsv = async () => {
@@ -245,11 +344,84 @@ export default function Billing() {
               Cycle: {new Date(estimate.cycleStart).toLocaleDateString()} –{' '}
               {new Date(estimate.cycleEnd).toLocaleDateString()}
             </Text>
+            {Number(estimate.prepaidCredit) > 0 && (
+              <Text style={styles.estimateDetails}>
+                Usage prepayments available: ₹{Number(estimate.prepaidCredit).toFixed(2)}
+              </Text>
+            )}
             <Text style={styles.estimateDisclaimer}>
               Estimate only. Your final monthly bill may differ.
             </Text>
           </View>
         )}
+
+        <View style={styles.usagePaymentCard}>
+          <Text style={styles.estimateTitle}>DEMO USAGE PAYMENT</Text>
+          <Text style={styles.estimateDisclaimer}>
+            Choose a recent window, calculate its meter movement, and make a Razorpay test payment.
+            It will be credited to the monthly bill; no live payment is accepted here.
+          </Text>
+          <View style={styles.usageInputRow}>
+            <Text style={styles.detailLabel}>Usage window (minutes)</Text>
+            <TextInput
+              style={styles.usageMinutesInput}
+              value={usageMinutes}
+              onChangeText={(value) => {
+                setUsageMinutes(value.replace(/[^0-9]/g, ''));
+                setUsageQuote(null);
+              }}
+              keyboardType="number-pad"
+              maxLength={4}
+              accessibilityLabel="Usage window in minutes"
+            />
+          </View>
+          <TouchableOpacity
+            style={[styles.generateButton, loadingUsageQuote && styles.generateButtonDisabled]}
+            onPress={fetchUsageQuote}
+            disabled={loadingUsageQuote || payingUsage}
+          >
+            {loadingUsageQuote ? (
+              <ActivityIndicator color={colors.void} />
+            ) : (
+              <Text style={styles.generateButtonText}>Calculate usage amount</Text>
+            )}
+          </TouchableOpacity>
+
+          {usageQuote && (
+            <>
+              <View style={styles.usageQuoteDetails}>
+                <View style={styles.detailRow}>
+                  <Text style={styles.detailLabel}>Meter movement</Text>
+                  <Text style={styles.detailValue}>
+                    {Number(usageQuote.unitsConsumed).toFixed(3)} kWh
+                  </Text>
+                </View>
+                <View style={styles.detailRow}>
+                  <Text style={styles.detailLabel}>Demo amount</Text>
+                  <Text style={styles.amountValue}>₹{Number(usageQuote.amount).toFixed(2)}</Text>
+                </View>
+                <Text style={styles.estimateDisclaimer}>
+                  Calculated at ₹{Number(usageQuote.tariffRate).toFixed(2)}/kWh. Any credit beyond
+                  the monthly bill carries forward.
+                </Text>
+              </View>
+              <TouchableOpacity
+                style={[styles.payButton, payingUsage && styles.generateButtonDisabled]}
+                onPress={handlePayUsage}
+                disabled={payingUsage}
+              >
+                {payingUsage ? (
+                  <ActivityIndicator color={colors.void} />
+                ) : (
+                  <>
+                    <Ionicons name="card" size={20} color={colors.void} />
+                    <Text style={styles.payButtonText}>Pay with Razorpay Test Mode</Text>
+                  </>
+                )}
+              </TouchableOpacity>
+            </>
+          )}
+        </View>
 
         {bills.length === 0 ? (
           <View style={styles.emptyState}>
@@ -415,6 +587,36 @@ const styles = StyleSheet.create({
     fontSize: 11,
     textAlign: 'center',
     marginTop: spacing.sm,
+  },
+  usagePaymentCard: {
+    backgroundColor: colors.circuit,
+    borderRadius: radii.md,
+    padding: spacing.md,
+    marginBottom: spacing.lg,
+    borderWidth: 1,
+    borderColor: colors.copper + '55',
+  },
+  usageInputRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: spacing.md,
+    marginBottom: spacing.sm,
+  },
+  usageMinutesInput: {
+    minWidth: 80,
+    paddingVertical: spacing.xs,
+    paddingHorizontal: spacing.sm,
+    backgroundColor: colors.void,
+    borderRadius: radii.sm,
+    borderWidth: 1,
+    borderColor: colors.mist,
+    color: colors.white,
+    fontFamily: fonts.mono,
+    textAlign: 'center',
+  },
+  usageQuoteDetails: {
+    marginTop: spacing.md,
   },
   emptyState: {
     alignItems: 'center',

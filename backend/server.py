@@ -2,7 +2,7 @@ from fastapi import FastAPI, HTTPException, Header, Response, Request, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime, Boolean, Text, inspect, text
 from sqlalchemy.orm import declarative_base, sessionmaker
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, Field
 from typing import Optional
 from datetime import datetime, timezone, timedelta, date, time
 from zoneinfo import ZoneInfo
@@ -212,6 +212,27 @@ class Payment(Base):
     amount = Column(Float, default=0.0)
     paymentDate = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     method = Column(String, default="wallet")
+
+
+class UsagePrepayment(Base):
+    """Tracks interval-based demo payments that are credited to monthly bills."""
+    __tablename__ = "usage_prepayments"
+    id = Column(Integer, primary_key=True)
+    usagePaymentId = Column(String, unique=True, nullable=False, index=True)
+    userId = Column(String, nullable=False, index=True)
+    monthlyBillId = Column(String, nullable=False, index=True)
+    razorpayOrderId = Column(String, unique=True, nullable=True, index=True)
+    razorpayPaymentId = Column(String, unique=True, nullable=True, index=True)
+    fromReadingId = Column(String, nullable=False)
+    toReadingId = Column(String, nullable=False)
+    windowStart = Column(DateTime, nullable=False)
+    windowEnd = Column(DateTime, nullable=False)
+    unitsConsumed = Column(Float, nullable=False)
+    amount = Column(Float, nullable=False)
+    status = Column(String, default="pending")
+    createdAt = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    expiresAt = Column(DateTime, nullable=False)
+    paidAt = Column(DateTime, nullable=True)
 
 
 class Notification(Base):
@@ -520,6 +541,150 @@ def meter_energy_delta(db, user_id: str, period_start: datetime, period_end: dat
     return round(latest.energy - baseline.energy, 2), latest
 
 
+def meter_energy_delta_between(db, user_id: str, window_start: datetime, window_end: datetime):
+    readings = (
+        db.query(EnergyReading)
+        .filter(
+            EnergyReading.userId == user_id,
+            EnergyReading.timestamp >= window_start,
+            EnergyReading.timestamp < window_end,
+        )
+        .order_by(EnergyReading.timestamp.asc(), EnergyReading.id.asc())
+        .all()
+    )
+    if not readings:
+        raise ValueError("No meter readings were recorded in the selected usage window.")
+
+    baseline = (
+        db.query(EnergyReading)
+        .filter(
+            EnergyReading.userId == user_id,
+            EnergyReading.timestamp < window_start,
+        )
+        .order_by(EnergyReading.timestamp.desc(), EnergyReading.id.desc())
+        .first()
+    )
+    if not baseline:
+        baseline = readings[0]
+    if baseline.energy is None or not math.isfinite(baseline.energy) or baseline.energy < 0:
+        raise ValueError("A valid baseline meter reading is required for this payment.")
+
+    previous_energy = baseline.energy
+    for reading in readings:
+        if reading.energy is None or not math.isfinite(reading.energy) or reading.energy < 0:
+            raise ValueError("A meter energy reading is invalid. Check the meter before payment.")
+        if reading.energy < previous_energy:
+            raise ValueError(
+                "The meter counter decreased in the selected usage window. "
+                "Check for a meter reset before payment."
+            )
+        previous_energy = reading.energy
+
+    return round(readings[-1].energy - baseline.energy, 3), baseline, readings[-1]
+
+
+def available_usage_credits(db, user_id: str) -> float:
+    paid_prepayments = (
+        db.query(UsagePrepayment)
+        .filter(UsagePrepayment.userId == user_id, UsagePrepayment.status == "paid")
+        .all()
+    )
+    total_paid = round(sum(item.amount for item in paid_prepayments), 2)
+    if total_paid <= 0:
+        return 0.0
+
+    monthly_bills = (
+        db.query(Bill)
+        .filter(Bill.userId == user_id, Bill.billId.like("bill_m%"))
+        .all()
+    )
+    if not monthly_bills:
+        return total_paid
+
+    breakdowns = {
+        row.billId: row
+        for row in db.query(BillBreakdown)
+        .filter(BillBreakdown.billId.in_([bill.billId for bill in monthly_bills]))
+        .all()
+    }
+    applied_credits = sum(
+        max(0.0, breakdowns[bill.billId].totalPayable - bill.amount)
+        for bill in monthly_bills
+        if bill.billId in breakdowns
+    )
+    return round(max(0.0, total_paid - applied_credits), 2)
+
+
+def current_usage_payment_quote(db, user, minutes: int, now: Optional[datetime] = None) -> dict:
+    now = now or datetime.now(timezone.utc)
+    if user.tariffRate is None or not math.isfinite(user.tariffRate) or user.tariffRate <= 0:
+        raise ValueError("The account tariff is invalid. Ask an administrator to correct it.")
+
+    anchor_date = billing_anchor_date(db, user)
+    if anchor_date > now.astimezone(IST).date():
+        raise ValueError("The meter install date is in the future. Check the consumer profile.")
+    cycle_start, cycle_end = billing_period_for_date(anchor_date, now)
+    if cycle_start >= cycle_end:
+        raise ValueError("The current monthly billing cycle is not available.")
+
+    monthly_bill_id = _period_bill_id(user.user_id, cycle_end)
+    existing_bill = db.query(Bill).filter(Bill.billId == monthly_bill_id).first()
+    if existing_bill:
+        raise ValueError("This monthly cycle is already finalized. Pay the monthly bill instead.")
+
+    requested_start = max(cycle_start, now - timedelta(minutes=minutes))
+    last_paid_window = (
+        db.query(UsagePrepayment)
+        .filter(
+            UsagePrepayment.userId == user.user_id,
+            UsagePrepayment.monthlyBillId == monthly_bill_id,
+            UsagePrepayment.status == "paid",
+        )
+        .order_by(UsagePrepayment.windowEnd.desc(), UsagePrepayment.id.desc())
+        .first()
+    )
+    if last_paid_window:
+        last_paid_end = last_paid_window.windowEnd
+        if last_paid_end.tzinfo is None:
+            last_paid_end = last_paid_end.replace(tzinfo=timezone.utc)
+        requested_start = max(requested_start, last_paid_end)
+
+    window_end = now + timedelta(microseconds=1)
+    units, baseline, latest = meter_energy_delta_between(
+        db, user.user_id, requested_start, window_end
+    )
+    latest_time = latest.timestamp
+    if latest_time.tzinfo is None:
+        latest_time = latest_time.replace(tzinfo=timezone.utc)
+    reading_age = now - latest_time.astimezone(timezone.utc)
+    if reading_age < timedelta(0):
+        raise ValueError("The latest meter reading is timestamped in the future.")
+    if reading_age > timedelta(minutes=10):
+        raise ValueError(
+            "The latest meter reading is older than 10 minutes. "
+            "Check the meter connection and try again."
+        )
+    if units <= 0:
+        raise ValueError("No new energy has been recorded in this window since the last payment.")
+
+    amount = round(units * user.tariffRate, 2)
+    if amount <= 0:
+        raise ValueError("The selected usage is too small to create a payment.")
+
+    return {
+        "monthlyBillId": monthly_bill_id,
+        "cycleStart": cycle_start,
+        "cycleEnd": cycle_end,
+        "windowStart": baseline.timestamp,
+        "windowEnd": latest.timestamp,
+        "fromReadingId": baseline.readingId,
+        "toReadingId": latest.readingId,
+        "unitsConsumed": units,
+        "tariffRate": user.tariffRate,
+        "amount": amount,
+    }
+
+
 def calculate_bill_total(db, user, units: float):
     if user.tariffRate is None or not math.isfinite(user.tariffRate) or user.tariffRate <= 0:
         raise ValueError("The account tariff is invalid. Ask an administrator to correct it before billing.")
@@ -641,6 +806,8 @@ def generate_bill_for_user(db, user):
     breakdown, arrears, interest, total_payable = calculate_bill_total(
         db, user, total_energy
     )
+    prepaid_credit = min(total_payable, available_usage_credits(db, user.user_id))
+    amount_due = round(max(0.0, total_payable - prepaid_credit), 2)
 
     # Carry forward prior unpaid bills so their balance is not lost.
     unpaid_bills = db.query(Bill).filter(
@@ -650,12 +817,12 @@ def generate_bill_for_user(db, user):
     for old_bill in unpaid_bills:
         old_bill.status = "rolled_forward"
 
-    fully_covered = total_payable <= 0
+    fully_covered = amount_due <= 0
 
     bill = Bill(
         billId=bill_id,
         userId=user.user_id,
-        amount=max(0.0, total_payable),
+        amount=amount_due,
         status="paid" if fully_covered else "unpaid",
         generatedAt=now,
         paidAt=now if fully_covered else None,
@@ -684,7 +851,7 @@ def generate_bill_for_user(db, user):
             message=(
                 "Your bill this period is fully covered - nothing to pay."
                 if fully_covered
-                else f"Your new bill of Rs.{max(0.0, total_payable):.2f} has been generated."
+                else f"Your new bill of Rs.{amount_due:.2f} has been generated."
             ),
             data=None,
         )
@@ -693,7 +860,7 @@ def generate_bill_for_user(db, user):
         db,
         user.user_id,
         "Bill fully covered" if fully_covered else "New bill generated",
-        "Nothing to pay this period." if fully_covered else f"Your new bill of Rs.{max(0.0, total_payable):.2f} is ready to pay.",
+        "Nothing to pay this period." if fully_covered else f"Your new bill of Rs.{amount_due:.2f} is ready to pay.",
     )
 
     if not fully_covered:
@@ -997,6 +1164,17 @@ class VerifyPaymentRequest(BaseModel):
     razorpay_signature: str
 
 
+class UsagePaymentRequest(BaseModel):
+    minutes: int = Field(ge=1, le=1440)
+
+
+class VerifyUsagePaymentRequest(BaseModel):
+    usagePaymentId: str
+    razorpay_order_id: str
+    razorpay_payment_id: str
+    razorpay_signature: str
+
+
 class PowerControlRequest(BaseModel):
     userId: str
     status: str
@@ -1046,6 +1224,10 @@ def bill_to_dict(bill: Bill, breakdown: Optional[BillBreakdown] = None) -> dict:
         "billId": bill.billId,
         "userId": bill.userId,
         "amount": bill.amount,
+        "prepaidCredit": (
+            round(max(0.0, breakdown.totalPayable - bill.amount), 2)
+            if breakdown else 0.0
+        ),
         "billMonth": (
             f"Monthly cycle ending {period_end.astimezone(IST).date().isoformat()}"
             if period_end else None
@@ -1745,6 +1927,7 @@ async def get_user_bill_estimate(request: Request, authorization: Optional[str] 
             breakdown, arrears, interest, estimated_amount = calculate_bill_total(
                 db, account, units
             )
+            prepaid_credit = available_usage_credits(db, account.user_id)
         except ValueError as exc:
             raise HTTPException(status_code=409, detail=str(exc))
         return {
@@ -1753,11 +1936,209 @@ async def get_user_bill_estimate(request: Request, authorization: Optional[str] 
             "cycleEnd": period_end,
             "lastReadingAt": latest_reading.timestamp,
             "unitsConsumed": units,
-            "estimatedAmount": max(0.0, estimated_amount),
+            "estimatedAmount": max(0.0, estimated_amount - prepaid_credit),
+            "prepaidCredit": prepaid_credit,
             "currentCharge": breakdown["currentCharge"],
             "arrears": arrears,
             "interest": interest,
             "breakdown": breakdown,
+        }
+    finally:
+        db.close()
+
+
+@app.post("/api/user/usage-payment/preview")
+async def preview_usage_payment(
+    payment_req: UsagePaymentRequest,
+    request: Request,
+    authorization: Optional[str] = Header(None),
+):
+    user = await get_current_user(authorization, request)
+    db = SessionLocal()
+    try:
+        account = db.query(DBUser).filter(DBUser.user_id == user.user_id).first()
+        if not account:
+            raise HTTPException(status_code=404, detail="User account not found")
+        try:
+            quote = current_usage_payment_quote(db, account, payment_req.minutes)
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc))
+        return {
+            "minutes": payment_req.minutes,
+            "unitsConsumed": quote["unitsConsumed"],
+            "tariffRate": quote["tariffRate"],
+            "amount": quote["amount"],
+            "windowStart": quote["windowStart"],
+            "windowEnd": quote["windowEnd"],
+            "cycleEnd": quote["cycleEnd"],
+            "paymentMode": "test",
+            "monthlyCredit": True,
+        }
+    finally:
+        db.close()
+
+
+@app.post("/api/user/usage-payment/order")
+async def create_usage_payment_order(
+    payment_req: UsagePaymentRequest,
+    request: Request,
+    authorization: Optional[str] = Header(None),
+):
+    user = await get_current_user(authorization, request)
+    if not RAZORPAY_KEY_ID.startswith("rzp_test_"):
+        raise HTTPException(
+            status_code=503,
+            detail="Interval usage payments are restricted to Razorpay test mode.",
+        )
+
+    db = SessionLocal()
+    try:
+        account = (
+            db.query(DBUser)
+            .filter(DBUser.user_id == user.user_id)
+            .with_for_update()
+            .first()
+        )
+        if not account:
+            raise HTTPException(status_code=404, detail="User account not found")
+
+        now = datetime.now(timezone.utc)
+        active_pending = db.query(UsagePrepayment).filter(
+            UsagePrepayment.userId == user.user_id,
+            UsagePrepayment.status == "pending",
+            UsagePrepayment.expiresAt > now,
+        ).first()
+        if active_pending:
+            raise HTTPException(
+                status_code=409,
+                detail="A usage payment is already awaiting checkout. Finish or cancel it first.",
+            )
+        expired_pending = db.query(UsagePrepayment).filter(
+            UsagePrepayment.userId == user.user_id,
+            UsagePrepayment.status == "pending",
+            UsagePrepayment.expiresAt <= now,
+        ).all()
+        for item in expired_pending:
+            item.status = "expired"
+
+        try:
+            quote = current_usage_payment_quote(db, account, payment_req.minutes, now)
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc))
+
+        usage_payment_id = f"usage_{uuid.uuid4().hex[:16]}"
+        try:
+            razorpay_order = razorpay_client.order.create({
+                "amount": int(round(quote["amount"] * 100)),
+                "currency": "INR",
+                "receipt": usage_payment_id,
+                "payment_capture": 1,
+            })
+        except Exception as exc:
+            db.rollback()
+            raise HTTPException(status_code=502, detail=f"Could not create payment order: {exc}")
+
+        usage_payment = UsagePrepayment(
+            usagePaymentId=usage_payment_id,
+            userId=user.user_id,
+            monthlyBillId=quote["monthlyBillId"],
+            razorpayOrderId=razorpay_order["id"],
+            fromReadingId=quote["fromReadingId"],
+            toReadingId=quote["toReadingId"],
+            windowStart=quote["windowStart"],
+            windowEnd=quote["windowEnd"],
+            unitsConsumed=quote["unitsConsumed"],
+            amount=quote["amount"],
+            status="pending",
+            createdAt=now,
+            expiresAt=now + timedelta(minutes=15),
+        )
+        db.add(usage_payment)
+        db.commit()
+        return {
+            "usagePaymentId": usage_payment_id,
+            "orderId": razorpay_order["id"],
+            "amount": razorpay_order["amount"],
+            "currency": razorpay_order["currency"],
+            "keyId": RAZORPAY_KEY_ID,
+            "unitsConsumed": quote["unitsConsumed"],
+            "minutes": payment_req.minutes,
+            "paymentMode": "test",
+        }
+    finally:
+        db.close()
+
+
+@app.post("/api/user/usage-payment/verify")
+async def verify_usage_payment(
+    verify_req: VerifyUsagePaymentRequest,
+    request: Request,
+    authorization: Optional[str] = Header(None),
+):
+    user = await get_current_user(authorization, request)
+    db = SessionLocal()
+    try:
+        usage_payment = db.query(UsagePrepayment).filter(
+            UsagePrepayment.usagePaymentId == verify_req.usagePaymentId,
+            UsagePrepayment.userId == user.user_id,
+        ).first()
+        if not usage_payment:
+            raise HTTPException(status_code=404, detail="Usage payment not found")
+        if usage_payment.status == "paid":
+            if usage_payment.razorpayPaymentId == verify_req.razorpay_payment_id:
+                return {"message": "Usage payment was already verified."}
+            raise HTTPException(status_code=409, detail="Usage payment was already completed.")
+        if usage_payment.status != "pending":
+            raise HTTPException(status_code=409, detail="Usage payment is no longer payable.")
+        if usage_payment.razorpayOrderId != verify_req.razorpay_order_id:
+            raise HTTPException(status_code=400, detail="Payment order does not match this usage payment.")
+        if db.query(Payment).filter(Payment.paymentId == verify_req.razorpay_payment_id).first():
+            raise HTTPException(status_code=409, detail="This payment was already recorded.")
+
+        try:
+            razorpay_client.utility.verify_payment_signature({
+                "razorpay_order_id": verify_req.razorpay_order_id,
+                "razorpay_payment_id": verify_req.razorpay_payment_id,
+                "razorpay_signature": verify_req.razorpay_signature,
+            })
+        except razorpay.errors.SignatureVerificationError:
+            raise HTTPException(status_code=400, detail="Payment verification failed")
+
+        now = datetime.now(timezone.utc)
+        usage_payment.razorpayPaymentId = verify_req.razorpay_payment_id
+        usage_payment.status = "paid"
+        usage_payment.paidAt = now
+        db.add(Payment(
+            paymentId=verify_req.razorpay_payment_id,
+            userId=user.user_id,
+            billId=usage_payment.usagePaymentId,
+            amount=usage_payment.amount,
+            paymentDate=now,
+            method="razorpay_test_usage",
+        ))
+        db.add(Notification(
+            notifId=f"notif_{uuid.uuid4().hex[:12]}",
+            userId=user.user_id,
+            type="usage_prepayment",
+            message=(
+                f"Test payment of Rs.{usage_payment.amount:.2f} received for "
+                f"{usage_payment.unitsConsumed:.3f} kWh. It will be credited to your monthly bill."
+            ),
+            data=json.dumps({"usagePaymentId": usage_payment.usagePaymentId}),
+            isRead=False,
+            createdAt=now,
+        ))
+        send_push_to_user(
+            db,
+            user.user_id,
+            "Usage payment successful",
+            f"Rs.{usage_payment.amount:.2f} test payment credited to your monthly bill.",
+        )
+        db.commit()
+        return {
+            "message": "Test payment verified and credited to the monthly bill.",
+            "amount": usage_payment.amount,
+            "unitsConsumed": usage_payment.unitsConsumed,
         }
     finally:
         db.close()
@@ -2333,6 +2714,9 @@ def generate_escom_style_receipt(bill, breakdown, profile, user) -> bytes:
     # --- Total ---
     pdf.set_font("Noto", size=9)
     kv_row("ಬಾಕಿ / TOTAL", f"Rs.{breakdown.totalPayable:,.2f}")
+    prepaid_credit = max(0.0, breakdown.totalPayable - bill.amount)
+    if prepaid_credit:
+        kv_row("Usage prepayments applied", f"-Rs.{prepaid_credit:,.2f}")
     dotted_rule()
 
     line(f"ಪಾವತಿಯ ಮೊತ್ತ / AMOUNT PAYABLE: Rs.{bill.amount:,.2f}", size=9, bold=True, gap=2)
@@ -2805,7 +3189,10 @@ async def get_admin_stats(request: Request, authorization: Optional[str] = Heade
     try:
         total_users = db.query(DBUser).filter(DBUser.role == "user").count()
         unpaid_bills = db.query(Bill).filter(Bill.status == "unpaid").count()
-        total_revenue = sum(item.amount for item in db.query(Payment).all())
+        total_revenue = sum(
+            item.amount
+            for item in db.query(Payment).filter(Payment.method != "razorpay_test_usage").all()
+        )
         return {"totalUsers": total_users, "unpaidBills": unpaid_bills, "totalRevenue": total_revenue}
     finally:
         db.close()

@@ -202,3 +202,151 @@ def test_due_reminders_send_each_stage_once(db_factory):
     assert stages == {"three_days_before", "due_today", "three_days_overdue"}
     assert len(reminders) == 3
     db.close()
+
+
+def test_usage_payment_preview_uses_recent_cumulative_meter_movement(db_factory):
+    db = db_factory()
+    now = datetime.now(timezone.utc)
+    user = create_user(
+        db,
+        now - timedelta(days=60),
+        session_token="test-session",
+        meter_install_date=now.strftime("%d/%m/%Y"),
+    )
+    add_reading(db, user.user_id, now - timedelta(minutes=9), 10.0)
+    add_reading(db, user.user_id, now - timedelta(minutes=2), 11.5)
+    db.close()
+
+    with TestClient(server.app, cookies={"session_token": "test-session"}) as client:
+        response = client.post("/api/user/usage-payment/preview", json={"minutes": 10})
+
+    assert response.status_code == 200
+    assert response.json()["unitsConsumed"] == pytest.approx(1.5)
+    assert response.json()["amount"] == pytest.approx(12.0)
+    assert response.json()["paymentMode"] == "test"
+    assert response.json()["monthlyCredit"] is True
+
+
+def test_usage_payment_order_is_blocked_outside_razorpay_test_mode(
+    db_factory, monkeypatch
+):
+    db = db_factory()
+    now = datetime.now(timezone.utc)
+    user = create_user(
+        db,
+        now - timedelta(days=60),
+        session_token="test-session",
+        meter_install_date=now.strftime("%d/%m/%Y"),
+    )
+    add_reading(db, user.user_id, now - timedelta(minutes=9), 10.0)
+    add_reading(db, user.user_id, now - timedelta(minutes=2), 11.5)
+    db.close()
+    monkeypatch.setattr(server, "RAZORPAY_KEY_ID", "rzp_live_not_allowed")
+
+    with TestClient(server.app, cookies={"session_token": "test-session"}) as client:
+        response = client.post("/api/user/usage-payment/order", json={"minutes": 10})
+
+    assert response.status_code == 503
+    assert "test mode" in response.json()["detail"]
+
+
+def test_usage_payment_test_checkout_verifies_once_and_records_credit(db_factory, monkeypatch):
+    db = db_factory()
+    now = datetime.now(timezone.utc)
+    user = create_user(
+        db,
+        now - timedelta(days=60),
+        session_token="test-session",
+        meter_install_date=now.strftime("%d/%m/%Y"),
+    )
+    add_reading(db, user.user_id, now - timedelta(minutes=9), 10.0)
+    add_reading(db, user.user_id, now - timedelta(minutes=2), 11.5)
+    db.close()
+
+    monkeypatch.setattr(server, "RAZORPAY_KEY_ID", "rzp_test_demo")
+    monkeypatch.setattr(
+        server.razorpay_client.order,
+        "create",
+        lambda _order: {"id": "order_test", "amount": 1200, "currency": "INR"},
+    )
+    monkeypatch.setattr(
+        server.razorpay_client.utility,
+        "verify_payment_signature",
+        lambda _signature: None,
+    )
+
+    with TestClient(server.app, cookies={"session_token": "test-session"}) as client:
+        order_response = client.post(
+            "/api/user/usage-payment/order", json={"minutes": 10}
+        )
+        order = order_response.json()
+        verification_payload = {
+            "usagePaymentId": order["usagePaymentId"],
+            "razorpay_order_id": order["orderId"],
+            "razorpay_payment_id": "pay_test_usage",
+            "razorpay_signature": "test-signature",
+        }
+        verify_response = client.post(
+            "/api/user/usage-payment/verify", json=verification_payload
+        )
+        duplicate_response = client.post(
+            "/api/user/usage-payment/verify", json=verification_payload
+        )
+
+    assert order_response.status_code == 200
+    assert order["paymentMode"] == "test"
+    assert verify_response.status_code == 200
+    assert duplicate_response.status_code == 200
+
+    db = db_factory()
+    prepayment = db.query(server.UsagePrepayment).one()
+    payment = db.query(server.Payment).one()
+    assert prepayment.status == "paid"
+    assert prepayment.amount == pytest.approx(12.0)
+    assert payment.method == "razorpay_test_usage"
+    assert payment.billId == prepayment.usagePaymentId
+    db.close()
+
+
+def test_monthly_bill_applies_usage_prepayment_credit(db_factory):
+    db = db_factory()
+    now = datetime.now(timezone.utc)
+    anchor_date = now.date() - timedelta(days=40)
+    user = create_user(
+        db,
+        now - timedelta(days=90),
+        meter_install_date=anchor_date.strftime("%d/%m/%Y"),
+    )
+    period_start = server._anchor_datetime(anchor_date)
+    period_end = server._next_anchor_after(anchor_date, period_start)
+    bill_id = server._period_bill_id(user.user_id, period_end)
+    add_reading(db, user.user_id, period_start - timedelta(minutes=1), 0.0)
+    add_reading(db, user.user_id, period_end - timedelta(minutes=1), 10.0)
+    db.add(
+        server.UsagePrepayment(
+            usagePaymentId="usage_test_credit",
+            userId=user.user_id,
+            monthlyBillId=bill_id,
+            fromReadingId="reading_start",
+            toReadingId="reading_end",
+            windowStart=period_start,
+            windowEnd=period_end - timedelta(minutes=1),
+            unitsConsumed=1.0,
+            amount=20.0,
+            status="paid",
+            createdAt=now - timedelta(days=2),
+            expiresAt=now + timedelta(days=1),
+        )
+    )
+    db.commit()
+    total_before_credit = server.calculate_bill_total(db, user, 10.0)[3]
+
+    bill = server.generate_bill_for_user(db, user)
+    db.commit()
+    breakdown = db.query(server.BillBreakdown).filter_by(billId=bill_id).one()
+
+    assert bill.amount == pytest.approx(max(0.0, total_before_credit - 20.0))
+    assert breakdown.totalPayable - bill.amount == pytest.approx(
+        min(total_before_credit, 20.0)
+    )
+    db.close()

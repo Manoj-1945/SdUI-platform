@@ -10,6 +10,7 @@ A modern mobile application for IoT-based Smart Energy Monitoring and Automatic 
 - **Energy History**: View consumption with daily, weekly, and monthly graphs
 - **Monthly Billing**: One payable bill per user-specific cycle, anchored to the meter installation date
 - **Monthly Estimate**: Preview current-cycle usage and estimated charges without creating a bill or charging auto-pay
+- **Demo Usage Payments**: Preview recent meter movement over a custom minute window and pay through Razorpay test mode; verified amounts credit the monthly bill, with excess carried forward
 - **Payment System**: Mock payment system with wallet balance
 - **Power Status**: Real-time power supply status (ON/OFF)
 - **Notifications**: Alerts for low balance, high usage, and bill reminders
@@ -91,8 +92,9 @@ User 5: user5@test.com / user5123
 3. **bills** - Generated bills with amount, status, and due dates
 4. **bill_breakdowns** - Itemized charges for finalized bills
 5. **payments** - Payment history
-6. **notifications** - System notifications
-7. **power_control** - Power ON/OFF control logs
+6. **usage_prepayments** - Verified test-mode usage payments and their monthly bill credits
+7. **notifications** - System notifications
+8. **power_control** - Power ON/OFF control logs
 
 ## 🔌 API Endpoints
 
@@ -109,6 +111,9 @@ User 5: user5@test.com / user5123
 - `GET /api/user/energy-history?period={daily|weekly|monthly}` - Energy history
 - `GET /api/user/bills` - User bills
 - `GET /api/user/bill-estimate` - Preview current monthly meter movement and estimated charges
+- `POST /api/user/usage-payment/preview` - Quote recent meter movement for a chosen number of minutes
+- `POST /api/user/usage-payment/order` - Create a Razorpay test-mode usage payment order
+- `POST /api/user/usage-payment/verify` - Verify the test payment and credit it against monthly billing
 - `POST /api/user/pay-bill` - Pay a bill
 - `GET /api/user/notifications` - Notifications
 - `GET /api/user/predicted-bill` - AI prediction
