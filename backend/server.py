@@ -1299,6 +1299,12 @@ def bill_to_dict(bill: Bill, breakdown: Optional[BillBreakdown] = None) -> dict:
 
 
 def reading_to_dict(reading: EnergyReading) -> dict:
+    timestamp = reading.timestamp
+    if timestamp:
+        if timestamp.tzinfo is None:
+            timestamp = timestamp.replace(tzinfo=timezone.utc)
+        else:
+            timestamp = timestamp.astimezone(timezone.utc)
     return {
         "readingId": reading.readingId,
         "userId": reading.userId,
@@ -1306,7 +1312,7 @@ def reading_to_dict(reading: EnergyReading) -> dict:
         "current": reading.current,
         "power": reading.power,
         "energy": reading.energy,
-        "timestamp": reading.timestamp,
+        "timestamp": timestamp,
     }
 
 

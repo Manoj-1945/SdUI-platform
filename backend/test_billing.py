@@ -157,6 +157,26 @@ def test_estimate_rejects_stale_meter_reading(db_factory):
     assert "older than 10 minutes" in response.json()["detail"]
 
 
+def test_energy_history_marks_database_timestamps_as_utc(db_factory):
+    db = db_factory()
+    now = datetime.now(timezone.utc)
+    user = create_user(
+        db,
+        now - timedelta(days=60),
+        session_token="test-session",
+        meter_install_date=now.strftime("%d/%m/%Y"),
+    )
+    add_reading(db, user.user_id, now - timedelta(minutes=1), 1.0)
+    db.close()
+
+    with TestClient(server.app, cookies={"session_token": "test-session"}) as client:
+        response = client.get("/api/user/energy-history?period=daily")
+
+    assert response.status_code == 200
+    timestamp = response.json()["readings"][0]["timestamp"]
+    assert timestamp.endswith("+00:00")
+
+
 def test_monthly_usage_rejects_reset_between_readings(db_factory):
     db = db_factory()
     now = datetime.now(timezone.utc)
