@@ -2206,8 +2206,7 @@ async def verify_usage_payment(
         db.query(UsagePaymentReminder).filter(
             UsagePaymentReminder.userId == user.user_id,
             UsagePaymentReminder.linkedUsagePaymentId == usage_payment.usagePaymentId,
-        ).update({"status": "paid"}, synchronize_session=False)
-        db.add(Payment(
+        ).update({"status": "paid"}, synchronize_session=False)        db.add(Payment(
             paymentId=verify_req.razorpay_payment_id,
             userId=user.user_id,
             billId=usage_payment.usagePaymentId,
